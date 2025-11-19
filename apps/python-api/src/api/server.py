@@ -21,7 +21,7 @@ def create_app(config_name='development'):
         config_name: Configuration name ('development', 'testing', 'production')
 
     Returns:
-        Configured Flask application and SocketIO instance
+        Configured Flask application
     """
     # Setup logger
     setup_logger(level=DevelopmentConfig.DEBUG and 'DEBUG' or 'INFO')
@@ -59,17 +59,6 @@ def create_app(config_name='development'):
     except Exception as e:
         from loguru import logger
         logger.error(f"Failed to register blueprints: {e}")
-        raise
-
-    # Register WebSocket handlers (CRITICAL FIX)
-    try:
-        from routes.websocket import register_socketio_handlers
-        register_socketio_handlers(socketio)
-        from loguru import logger
-        logger.info("✅ WebSocket handlers registered successfully")
-    except Exception as e:
-        from loguru import logger
-        logger.error(f"❌ Failed to register WebSocket handlers: {e}")
         raise
 
     # Add error handlers
@@ -113,15 +102,6 @@ def main():
     app, socketio = create_app('development')
 
     # Run development server
-    print("=" * 60)
-    print("🚀 Bijoux AI Tracking API Starting...")
-    print("=" * 60)
-    print(f"📍 Server: http://localhost:5000")
-    print(f"🔌 WebSocket: ws://localhost:5000/socket.io/")
-    print(f"❤️  Health: http://localhost:5000/health")
-    print(f"🎯 Tracking: http://localhost:5000/api/track")
-    print("=" * 60)
-    
     socketio.run(
         app,
         host='0.0.0.0',

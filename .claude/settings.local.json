@@ -10,7 +10,18 @@
       "Bash(echo:*)",
       "Bash(PYTHONPATH=$PWD/.. /c/AR_jewel/python-api/venv/Scripts/python:*)",
       "Bash(PYTHONPATH=src /c/AR_jewel/python-api/venv/Scripts/python -c:*)",
-      "Bash(PYTHONPATH=src /c/AR_jewel/python-api/venv/Scripts/python:*)"
+      "Bash(PYTHONPATH=src /c/AR_jewel/python-api/venv/Scripts/python:*)",
+      "Bash(venv/Scripts/python -c \"import sys; print(f''Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}'')\")",
+      "Bash(npx tsc --noEmit)",
+      "Bash(test -f start_server.ps1:*)",
+      "Bash(timeout 5 ./start_server.ps1)",
+      "Bash(where powershell)",
+      "Bash(rm:*)",
+      "Bash(mkdir apps)",
+      "Bash(tree /F apps /A)",
+      "Bash(python -m venv venv)",
+      "Bash(/c/AR_jewel/apps/python-api/logs/.gitkeep)",
+      "Bash(git add .)"
     ],
     "deny": [],
     "ask": []
