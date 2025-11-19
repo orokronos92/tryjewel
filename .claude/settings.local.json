@@ -21,7 +21,10 @@
       "Bash(tree /F apps /A)",
       "Bash(python -m venv venv)",
       "Bash(/c/AR_jewel/apps/python-api/logs/.gitkeep)",
-      "Bash(git add .)"
+      "Bash(git add .)",
+      "Bash(git commit -m \"$(cat <<'EOF'\nPhase 0: Configuration variables d'environnement\n\n- Creation .env.local (frontend)\n- Creation .env.example (frontend)\n- Creation .env (backend)\n- Creation .env.example (backend)\n- Creation dossier logs/\n\nLes fichiers .env et .env.local sont ignores par Git (.gitignore mis a jour)\nEOF\n)\":*)",
+      "Bash(git commit -m \"Phase 0: Configuration variables d''environnement\")",
+      "Bash(venv/Scripts/pip install:*)"
     ],
     "deny": [],
     "ask": []
