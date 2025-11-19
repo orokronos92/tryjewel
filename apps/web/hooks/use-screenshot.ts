@@ -41,9 +41,10 @@ export function useScreenshot(): UseScreenshotReturn {
 
       await saveItem({
         id: uuidv4(),
-        dataUrl,
-        timestamp: new Date().toISOString(),
-        jewelry: {},
+        screenshot_data: dataUrl.split(',')[1] || dataUrl, // Remove base64 prefix if present
+        jewelry_type: 'screenshot',
+        timestamp: Date.now(),
+        metadata: {}, // Store additional metadata if needed
       });
 
       return dataUrl;

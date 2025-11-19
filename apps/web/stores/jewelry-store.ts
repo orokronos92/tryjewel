@@ -42,6 +42,9 @@ interface JewelryStoreState {
   // Current selection
   selected: SelectedJewelry;
 
+  // Selected model for 3D rendering
+  selectedModel: any | null;
+
   // Available jewelry items
   available_jewelry: JewelryItem[];
 
@@ -55,6 +58,7 @@ interface JewelryStoreState {
   setFinger: (finger: Finger) => void;
   setHand: (hand: Hand) => void;
   setPlacement: (placement: SelectedJewelry['placement']) => void;
+  setSelectedModel: (model: any | null) => void;
 
   // Jewelry management
   addJewelry: (item: JewelryItem) => void;
@@ -83,6 +87,7 @@ export const useJewelryStore = create<JewelryStoreState>()(
     (set, get) => ({
       // State
       selected: { ...defaultSelected },
+      selectedModel: null,
       available_jewelry: [],
       is_selector_open: false,
       is_loading: false,
@@ -112,6 +117,11 @@ export const useJewelryStore = create<JewelryStoreState>()(
         set((state) => ({
           selected: { ...state.selected, placement }
         })),
+
+      setSelectedModel: (model) =>
+        set({
+          selectedModel: model
+        }),
 
       // Jewelry management
       addJewelry: (item) =>
