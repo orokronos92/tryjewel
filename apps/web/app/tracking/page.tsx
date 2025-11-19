@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect } from "react";
 import { CameraFeed } from "@/components/camera-feed";
 import { useARTracking } from "@/hooks/use-ar-tracking";
 import { useCameraStore } from "@/stores/camera-store";
@@ -14,9 +14,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CameraIcon, Activity } from "lucide-react";
+import { Activity } from "lucide-react";
 
 function JewelrySelector() {
   const { selected, setJewelryType, setFinger, setHand } = useJewelryStore();
@@ -35,7 +35,7 @@ function JewelrySelector() {
           <SelectContent>
             <SelectItem value="ring">💍 Bague</SelectItem>
             <SelectItem value="bracelet">⌚ Bracelet</SelectItem>
-            <SelectItem value="earring">💎 Boucle d'oreille</SelectItem>
+            <SelectItem value="earring">💎 Boucle d&apos;oreille</SelectItem>
             <SelectItem value="necklace">📿 Collier</SelectItem>
           </SelectContent>
         </Select>
@@ -85,14 +85,19 @@ function JewelrySelector() {
 
 export default function TrackingPage() {
   const { camera } = useCameraStore();
-  const { tracking, connection_status } = useTrackingStore();
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const { isTracking, startTracking, stopTracking } = useARTracking(videoRef.current);
+  const { connection_status } = useTrackingStore();
+  
+  // Pour l'instant on passe null, on connectera le video element plus tard
+  const videoElement = null;
+  const { isTracking, startTracking, stopTracking } = useARTracking(videoElement);
 
-  // Connect videoRef to camera stream
-  if (camera.stream && videoRef.current && !videoRef.current.srcObject) {
-    videoRef.current.srcObject = camera.stream;
-  }
+  // Initialiser WebSocket au montage du composant
+  useEffect(() => {
+    console.log("Initialisation WebSocket...");
+    const store = useTrackingStore.getState();
+    store.initializeSocket();
+    store.connect();
+  }, []);
 
   return (
     <div className="min-h-screen bg-background p-4">
@@ -132,7 +137,7 @@ export default function TrackingPage() {
                 <div className="flex justify-between">
                   <span>Tracking:</span>
                   <Badge variant={isTracking ? "default" : "secondary"}>
-                    {isTracking ? "🎯 Actif" : "⏸️ Inactif"}
+                    {isTracking ? "🎯 Actif" : "⸻ Inactif"}
                   </Badge>
                 </div>
 
@@ -150,34 +155,17 @@ export default function TrackingPage() {
             </Card>
           </div>
 
-          {/* Right Panel - Camera */}
-          <div className="lg:col-span-2">
-            <Card className="p-0 overflow-hidden">
-              <CardContent className="p-0">
-                {camera.isActive ? (
-                  <div className="relative">
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover aspect-video"
-                    />
-                    {isTracking && (
-                      <div className="absolute top-4 left-4 bg-black/70 text-white px-3 py-2 rounded-lg">
-                        <div className="text-sm font-medium">🎯 Tracking actif</div>
-                        <div className="text-xs text-green-400">Envoi des frames...</div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="aspect-video bg-muted flex flex-col items-center justify-center gap-4">
-                    <CameraIcon className="w-16 h-16 text-muted-foreground" />
-                    <p className="text-muted-foreground">Caméra inactive</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+          {/* Right Panel - Camera Feed */}
+          <div className="lg:col-span-2 relative">
+            <CameraFeed autoStart={true} showControls={true} />
+            
+            {/* Tracking indicator overlay */}
+            {isTracking && camera.isActive && (
+              <div className="absolute top-8 left-8 bg-black/70 text-white px-3 py-2 rounded-lg z-10">
+                <div className="text-sm font-medium">🎯 Tracking actif</div>
+                <div className="text-xs text-green-400">Envoi des frames...</div>
+              </div>
+            )}
           </div>
         </div>
       </div>

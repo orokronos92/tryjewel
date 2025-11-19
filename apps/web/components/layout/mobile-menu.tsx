@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 const links = [
   { href: "/#features", label: "Fonctionnalités" },
   { href: "/#how-it-works", label: "Comment ça marche" },
+  { href: "/tracking", label: "Essayer maintenant" }, // ← NOUVEAU
   { href: "/gallery", label: "Galerie" },
   { href: "/faq", label: "FAQ" },
 ];
@@ -78,8 +79,9 @@ export function MobileMenu({ className }: MobileMenuProps) {
                 <Button
                   className="w-full bg-gold-500 hover:bg-gold-600"
                   onClick={closeMenu}
+                  asChild
                 >
-                  Essayer maintenant
+                  <Link href="/tracking">Essayer maintenant</Link>
                 </Button>
               </div>
             </nav>

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Logo } from "@/components/layout/logo";
 import { Navigation } from "@/components/layout/navigation";
 import { MobileMenu } from "@/components/layout/mobile-menu";
@@ -20,11 +21,11 @@ export function Header({ className }: HeaderProps) {
         <Logo />
         <Navigation className="hidden md:block" />
         <div className="flex items-center gap-4">
-          <Button variant="ghost" className="hidden md:inline-flex">
-            À propos
+          <Button variant="ghost" className="hidden md:inline-flex" asChild>
+            <Link href="/about">À propos</Link>
           </Button>
-          <Button className="hidden md:inline-flex bg-gold-500 hover:bg-gold-600">
-            Essayer maintenant
+          <Button className="hidden md:inline-flex bg-gold-500 hover:bg-gold-600" asChild>
+            <Link href="/tracking">Essayer maintenant</Link>
           </Button>
           <MobileMenu className="md:hidden" />
         </div>
