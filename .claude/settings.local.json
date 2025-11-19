@@ -24,7 +24,13 @@
       "Bash(git add .)",
       "Bash(git commit -m \"$(cat <<'EOF'\nPhase 0: Configuration variables d'environnement\n\n- Creation .env.local (frontend)\n- Creation .env.example (frontend)\n- Creation .env (backend)\n- Creation .env.example (backend)\n- Creation dossier logs/\n\nLes fichiers .env et .env.local sont ignores par Git (.gitignore mis a jour)\nEOF\n)\":*)",
       "Bash(git commit -m \"Phase 0: Configuration variables d''environnement\")",
-      "Bash(venv/Scripts/pip install:*)"
+      "Bash(venv/Scripts/pip install:*)",
+      "Bash(git commit -m \"Phase 0: Documentation complete (README, INSTALLATION, COMMANDS)\")",
+      "Bash(npm run build)",
+      "Bash(timeout 90 npm run build:*)",
+      "Bash(timeout 120 npm run build)",
+      "Bash(timeout 30 venv/Scripts/python:*)",
+      "Bash(PYTHONPATH=$PWD/src timeout 30 venv/Scripts/python src/api/server.py)"
     ],
     "deny": [],
     "ask": []
