@@ -22,6 +22,7 @@ class Config:
     # Redis settings
     REDIS_URL: str = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
     REDIS_CACHE_TTL: int = 100  # milliseconds
+    REDIS_MAX_CONNECTIONS: int = 10
 
     # MediaPipe settings
     MEDIAPIPE_MODEL_COMPLEXITY: int = 1

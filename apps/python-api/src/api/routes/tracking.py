@@ -4,7 +4,7 @@ This module provides the jewelry tracking API endpoint.
 """
 import base64
 import numpy as np
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from PIL import Image
 import io
 
@@ -79,6 +79,13 @@ def track_jewelry():
                 'error': f'Validation error: {str(e)}'
             }), 400
 
+        # Check cache
+        cache_key = f"landmarks:{request.remote_addr}"
+        cached_result = current_app.config['redis_cache'].get_landmarks(cache_key)
+        if cached_result:
+            cached_result['request_id'] = validated.request_id
+            return jsonify(cached_result)
+
         # Initialize tracker if not already done
         if not hand_tracker.is_initialized:
             try:
@@ -111,6 +118,15 @@ def track_jewelry():
                 'success': False,
                 'error': f'Unsupported jewelry type: {validated.jewelry_type}'
             }), 400
+
+        # Cache result
+        if result['success']:
+            cache_key = f"landmarks:{request.remote_addr}"
+            current_app.config['redis_cache'].set_landmarks(
+                cache_key,
+                result,
+                ttl=current_app.config.get('REDIS_CACHE_TTL', 100)
+            )
 
         # Add processing metadata
         result['request_id'] = validated.request_id

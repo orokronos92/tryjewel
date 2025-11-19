@@ -1,84 +1,150 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
+import { CameraFeed } from "@/components/camera-feed";
+import { useARTracking } from "@/hooks/use-ar-tracking";
+import { useCameraStore } from "@/stores/camera-store";
+import { useJewelryStore } from "@/stores/jewelry-store";
+import { useTrackingStore } from "@/stores/tracking-store";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { CameraIcon } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { CameraIcon, Activity } from "lucide-react";
 
-export default function TrackingPage() {
-  const [cameraActive, setCameraActive] = useState(false);
+function JewelrySelector() {
+  const { selected, setJewelryType, setFinger, setHand } = useJewelryStore();
 
   return (
-    <div className="min-h-screen bg-background p-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Virtual Try-On</h1>
-          <p className="text-muted-foreground">
-            AR jewelry tracking (simplified version)
-          </p>
-        </div>
+    <div className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium mb-2">Type de bijou</label>
+        <Select
+          value={selected.jewelry_type || "ring"}
+          onValueChange={(value: "ring" | "bracelet" | "earring" | "necklace") => setJewelryType(value)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ring">💍 Bague</SelectItem>
+            <SelectItem value="bracelet">⌚ Bracelet</SelectItem>
+            <SelectItem value="earring">💎 Boucle d'oreille</SelectItem>
+            <SelectItem value="necklace">📿 Collier</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
-        {/* Main Content */}
+      {selected.jewelry_type === "ring" && (
+        <>
+          <div>
+            <label className="block text-sm font-medium mb-2">Main</label>
+            <Select
+              value={selected.hand}
+              onValueChange={(value: "left" | "right") => setHand(value)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="left">🤚 Gauche</SelectItem>
+                <SelectItem value="right">🤚 Droite</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Doigt</label>
+            <Select
+              value={selected.finger}
+              onValueChange={(value: "thumb" | "index" | "middle" | "ring" | "pinky") => setFinger(value)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="thumb">Pouce</SelectItem>
+                <SelectItem value="index">Index</SelectItem>
+                <SelectItem value="middle">Majeur</SelectItem>
+                <SelectItem value="ring">Annulaire</SelectItem>
+                <SelectItem value="pinky">Auriculaire</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function TrackingPage() {
+  const { camera } = useCameraStore();
+  const { tracking, connection_status } = useTrackingStore();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const { isTracking, startTracking, stopTracking } = useARTracking(videoRef.current);
+
+  // Connect videoRef to camera stream
+  if (camera.stream && videoRef.current && !videoRef.current.srcObject) {
+    videoRef.current.srcObject = camera.stream;
+  }
+
+  return (
+    <div className="min-h-screen bg-background p-4">
+      <div className="max-w-7xl mx-auto">
+        <h1 className="text-3xl font-bold mb-6">
+          🤖 AR Virtual Try-On (Phase 3 - Beta)
+        </h1>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Panel - Controls */}
-          <div className="lg:col-span-1 space-y-6">
+          <div className="space-y-6">
             <Card className="p-6">
-              <h2 className="text-xl font-semibold mb-4">Jewelry Selection</h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2">
-                    Type
-                  </label>
-                  <select className="w-full p-2 border rounded">
-                    <option value="ring">Ring</option>
-                    <option value="bracelet">Bracelet</option>
-                    <option value="earring">Earring</option>
-                    <option value="necklace">Necklace</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">
-                    Finger
-                  </label>
-                  <select className="w-full p-2 border rounded">
-                    <option value="ring">Ring Finger</option>
-                    <option value="index">Index</option>
-                    <option value="middle">Middle</option>
-                    <option value="thumb">Thumb</option>
-                    <option value="pinky">Pinky</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">
-                    Hand
-                  </label>
-                  <select className="w-full p-2 border rounded">
-                    <option value="left">Left</option>
-                    <option value="right">Right</option>
-                  </select>
-                </div>
-              </div>
+              <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                <Activity className="w-5 h-5" />
+                Configuration
+              </h2>
+              <JewelrySelector />
             </Card>
 
             <Card className="p-6">
-              <h2 className="text-xl font-semibold mb-4">Status</h2>
-              <div className="space-y-2 text-sm">
+              <h2 className="text-lg font-semibold mb-4">Statut</h2>
+              <div className="space-y-3 text-sm">
                 <div className="flex justify-between">
-                  <span>Camera:</span>
-                  <span className={cameraActive ? "text-green-500" : "text-red-500"}>
-                    {cameraActive ? "Active" : "Inactive"}
-                  </span>
+                  <span>Caméra:</span>
+                  <Badge variant={camera.isActive ? "default" : "secondary"}>
+                    {camera.isActive ? "✅ Active" : "❌ Inactive"}
+                  </Badge>
                 </div>
+
                 <div className="flex justify-between">
-                  <span>Connection:</span>
-                  <span className="text-yellow-500">Connecting...</span>
+                  <span>WebSocket:</span>
+                  <Badge variant={connection_status === 'connected' ? "default" : "secondary"}>
+                    {connection_status === 'connected' ? "✅ Connecté" : "❌ Déconnecté"}
+                  </Badge>
                 </div>
+
                 <div className="flex justify-between">
-                  <span>FPS:</span>
-                  <span>0</span>
+                  <span>Tracking:</span>
+                  <Badge variant={isTracking ? "default" : "secondary"}>
+                    {isTracking ? "🎯 Actif" : "⏸️ Inactif"}
+                  </Badge>
+                </div>
+
+                <div className="pt-4 border-t">
+                  <Button
+                    onClick={isTracking ? stopTracking : startTracking}
+                    disabled={!camera.isActive || connection_status !== 'connected'}
+                    variant={isTracking ? "destructive" : "default"}
+                    className="w-full"
+                  >
+                    {isTracking ? "⏹️ Arrêter tracking" : "🚀 Démarrer tracking"}
+                  </Button>
                 </div>
               </div>
             </Card>
@@ -86,33 +152,31 @@ export default function TrackingPage() {
 
           {/* Right Panel - Camera */}
           <div className="lg:col-span-2">
-            <Card className="p-6 h-[600px] flex flex-col items-center justify-center">
-              {!cameraActive ? (
-                <div className="text-center">
-                  <CameraIcon className="w-16 h-16 text-muted-foreground mb-4 mx-auto" />
-                  <h2 className="text-2xl font-bold mb-2">Camera Inactive</h2>
-                  <p className="text-muted-foreground mb-6">
-                    Click the button below to start the camera
-                  </p>
-                  <Button
-                    onClick={() => setCameraActive(true)}
-                    size="lg"
-                  >
-                    <CameraIcon className="w-5 h-5 mr-2" />
-                    Start Camera
-                  </Button>
-                </div>
-              ) : (
-                <div className="w-full h-full bg-black rounded-lg flex items-center justify-center">
-                  <p className="text-white">
-                    Camera feed will appear here
-                    <br />
-                    <span className="text-sm text-gray-400">
-                      (WebRTC integration required)
-                    </span>
-                  </p>
-                </div>
-              )}
+            <Card className="p-0 overflow-hidden">
+              <CardContent className="p-0">
+                {camera.isActive ? (
+                  <div className="relative">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover aspect-video"
+                    />
+                    {isTracking && (
+                      <div className="absolute top-4 left-4 bg-black/70 text-white px-3 py-2 rounded-lg">
+                        <div className="text-sm font-medium">🎯 Tracking actif</div>
+                        <div className="text-xs text-green-400">Envoi des frames...</div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="aspect-video bg-muted flex flex-col items-center justify-center gap-4">
+                    <CameraIcon className="w-16 h-16 text-muted-foreground" />
+                    <p className="text-muted-foreground">Caméra inactive</p>
+                  </div>
+                )}
+              </CardContent>
             </Card>
           </div>
         </div>

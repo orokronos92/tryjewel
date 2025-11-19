@@ -11,6 +11,7 @@ import os
 
 from config.settings import DevelopmentConfig, config
 from utils.logger import setup_logger
+from utils.cache import RedisCache
 
 
 def create_app(config_name='development'):
@@ -32,6 +33,10 @@ def create_app(config_name='development'):
     # Load configuration
     cfg = config[config_name]
     app.config.from_object(cfg)
+
+    # Initialize Redis cache
+    redis_cache = RedisCache(app.config['REDIS_URL'])
+    app.config['redis_cache'] = redis_cache
 
     # CORS configuration
     CORS(
