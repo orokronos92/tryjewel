@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(venvScriptspip install -r:*)",
+      "Bash(.start_server.ps1)",
+      "Bash(source:*)",
+      "Bash(PYTHONPATH=$PWD/src python:*)",
+      "Bash(PYTHONPATH=$PWD/src /c/AR_jewel/python-api/venv/Scripts/python:*)",
+      "Bash(echo:*)",
+      "Bash(PYTHONPATH=$PWD/.. /c/AR_jewel/python-api/venv/Scripts/python:*)",
+      "Bash(PYTHONPATH=src /c/AR_jewel/python-api/venv/Scripts/python -c:*)",
+      "Bash(PYTHONPATH=src /c/AR_jewel/python-api/venv/Scripts/python:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
