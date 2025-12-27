@@ -392,9 +392,9 @@ export default function TrackingPage() {
                 </div>
               )}
 
-              {/* Indicateur de taille de bague */}
+              {/* Sélecteur de doigt + taille (4 cases cliquables) */}
               {isTracking && !isCalibrating && isCalibrated && (
-                <RingSizeIndicatorCompact className="absolute top-16 right-2 z-20" />
+                <RingSizeSummary className="absolute top-16 right-2 z-20" />
               )}
 
               {/* Contrôles AR */}
@@ -568,9 +568,9 @@ export default function TrackingPage() {
                 </div>
               )}
 
-              {/* Indicateur de taille de bague */}
+              {/* Sélecteur de doigt + taille (4 cases cliquables) */}
               {isTracking && !isCalibrating && isCalibrated && (
-                <RingSizeIndicatorCompact className="absolute top-8 right-8 z-20" />
+                <RingSizeSummary className="absolute top-8 right-8 z-20" />
               )}
 
               {/* Contrôles AR */}

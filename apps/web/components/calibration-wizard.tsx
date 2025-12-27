@@ -42,29 +42,29 @@ interface StepConfig {
 const STEPS: StepConfig[] = [
     {
         icon: <CreditCard className="h-5 w-5" />,
-        title: "Carte (proche)",
-        instruction: "Placez une carte bancaire dans le cadre bleu",
+        title: "Carte (30cm)",
+        instruction: "Placez une carte bancaire à 30cm de la caméra et ajustez le cadre",
         type: 'card',
         distance: 'close',
     },
     {
         icon: <Hand className="h-5 w-5" />,
-        title: "Main (proche)",
-        instruction: "Posez la carte, montrez votre main ouverte",
+        title: "Main (30cm)",
+        instruction: "Gardez la même distance (30cm) et ajustez le contour à votre main",
         type: 'hand',
         distance: 'close',
     },
     {
         icon: <CreditCard className="h-5 w-5" />,
-        title: "Carte (loin)",
-        instruction: "Reculez et placez la carte dans le cadre",
+        title: "Carte (50cm)",
+        instruction: "Reculez à 50cm et ajustez le cadre à la carte",
         type: 'card',
         distance: 'far',
     },
     {
         icon: <Hand className="h-5 w-5" />,
-        title: "Main (loin)",
-        instruction: "Montrez votre main à cette distance",
+        title: "Main (50cm)",
+        instruction: "Gardez la distance (50cm) et ajustez le contour à votre main",
         type: 'hand',
         distance: 'far',
     },
@@ -400,91 +400,85 @@ export function CalibrationWizard({
             );
         }
 
-        // Type = hand - Afficher les vrais landmarks MediaPipe
-        // Convertir landmarks normalisés en coordonnées container
-        const landmarksInContainer = landmarks?.map(lm => ({
-            x: lm.x * containerWidth,
-            y: lm.y * containerHeight,
-        })) || [];
-
+        // Type = hand - Contour ajustable pour calibrer la taille de la main
         return (
-            <>
-                {/* Zone d'affichage des landmarks */}
-                <div className="relative flex-1 flex items-center justify-center w-full">
-                    {handDetected && landmarks && landmarks.length >= 21 ? (
-                        <>
-                            {/* SVG pour dessiner les landmarks réels */}
-                            <svg
-                                className="absolute inset-0 w-full h-full pointer-events-none"
-                                viewBox={`0 0 ${containerWidth} ${containerHeight}`}
-                                preserveAspectRatio="none"
-                            >
-                                {/* Connexions entre landmarks */}
-                                {HAND_CONNECTIONS.map(([start, end], idx) => (
-                                    <line
-                                        key={`conn-${idx}`}
-                                        x1={landmarksInContainer[start]?.x || 0}
-                                        y1={landmarksInContainer[start]?.y || 0}
-                                        x2={landmarksInContainer[end]?.x || 0}
-                                        y2={landmarksInContainer[end]?.y || 0}
-                                        stroke="#22c55e"
-                                        strokeWidth="2"
-                                        strokeLinecap="round"
-                                    />
-                                ))}
+            <div className="relative w-full h-full flex flex-col">
+                {/* Zone centrale - contour de main ajustable */}
+                <div className="flex-1 flex items-center justify-center relative">
+                    {/* Contour de main (rectangle vert ajustable) */}
+                    <div
+                        className="border-2 border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.5)] relative rounded-lg"
+                        style={{
+                            width: handWidthPx,
+                            height: handHeightPx,
+                            transition: 'width 0.1s, height 0.1s',
+                        }}
+                    >
+                        {/* Coins décoratifs */}
+                        <div className="absolute -top-1 -left-1 w-5 h-5 border-t-2 border-l-2 border-green-400 rounded-tl" />
+                        <div className="absolute -top-1 -right-1 w-5 h-5 border-t-2 border-r-2 border-green-400 rounded-tr" />
+                        <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-2 border-l-2 border-green-400 rounded-bl" />
+                        <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-2 border-r-2 border-green-400 rounded-br" />
 
-                                {/* Points des landmarks */}
-                                {landmarksInContainer.map((lm, idx) => (
-                                    <circle
-                                        key={`lm-${idx}`}
-                                        cx={lm.x}
-                                        cy={lm.y}
-                                        r={idx === 0 ? 6 : 4}
-                                        fill={idx === 0 ? "#3b82f6" : "#22c55e"}
-                                        stroke="white"
-                                        strokeWidth="1"
-                                    />
-                                ))}
-                            </svg>
-
-                            {/* Indicateur de détection */}
-                            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-green-500 text-white text-sm px-3 py-1.5 rounded-full shadow-lg">
-                                ✅ Main détectée
-                            </div>
-
-                            {/* Affichage des tailles calculées */}
-                            {calculatedMeasurements && step.distance === 'close' && (
-                                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/80 rounded-lg p-3 text-xs space-y-1">
-                                    <div className="text-green-400 font-semibold mb-2">Tailles de bague calculées:</div>
-                                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                                        <span className="text-gray-400">Index:</span>
-                                        <span className="text-cyan-400 font-mono">
-                                            EU {calculatedMeasurements.index?.ringSizes.eu.toFixed(0)} / US {calculatedMeasurements.index?.ringSizes.us.toFixed(1)}
-                                        </span>
-                                        <span className="text-gray-400">Majeur:</span>
-                                        <span className="text-cyan-400 font-mono">
-                                            EU {calculatedMeasurements.middle?.ringSizes.eu.toFixed(0)} / US {calculatedMeasurements.middle?.ringSizes.us.toFixed(1)}
-                                        </span>
-                                        <span className="text-gray-400">Annulaire:</span>
-                                        <span className="text-cyan-400 font-mono">
-                                            EU {calculatedMeasurements.ring?.ringSizes.eu.toFixed(0)} / US {calculatedMeasurements.ring?.ringSizes.us.toFixed(1)}
-                                        </span>
-                                        <span className="text-gray-400">Auriculaire:</span>
-                                        <span className="text-cyan-400 font-mono">
-                                            EU {calculatedMeasurements.pinky?.ringSizes.eu.toFixed(0)} / US {calculatedMeasurements.pinky?.ringSizes.us.toFixed(1)}
-                                        </span>
-                                    </div>
-                                </div>
-                            )}
-                        </>
-                    ) : (
-                        // Message discret si pas de main détectée
-                        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-yellow-500/90 text-black text-sm px-4 py-2 rounded-full shadow-lg">
-                            🖐️ Montrez votre main ouverte
+                        {/* Icône main au centre */}
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <Hand className="w-16 h-16 text-green-500/30" />
                         </div>
-                    )}
+
+                        {/* Labels dimensions */}
+                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                            {Math.round(handWidthPx)}px
+                        </div>
+                        <div className="absolute top-1/2 -right-14 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                            {Math.round(handHeightPx)}px
+                        </div>
+                    </div>
+
+                    {/* Instruction */}
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-green-600/90 text-white text-sm px-4 py-2 rounded-full shadow-lg">
+                        🖐️ Placez votre main dans le cadre
+                    </div>
                 </div>
-            </>
+
+                {/* Sliders en bas */}
+                <div className="bg-black/70 p-4 rounded-t-lg space-y-3">
+                    {/* Slider Largeur */}
+                    <div className="max-w-md mx-auto space-y-1">
+                        <div className="flex justify-between text-xs text-gray-300">
+                            <span>Étroit</span>
+                            <span className="text-green-400 font-mono">Largeur: {Math.round(handWidthPx)}px</span>
+                            <span>Large</span>
+                        </div>
+                        <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="0.5"
+                            value={handWidthSlider}
+                            onChange={(e) => setHandWidthSlider(Number(e.target.value))}
+                            className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
+                        />
+                    </div>
+
+                    {/* Slider Hauteur */}
+                    <div className="max-w-md mx-auto space-y-1">
+                        <div className="flex justify-between text-xs text-gray-300">
+                            <span>Court</span>
+                            <span className="text-green-400 font-mono">Hauteur: {Math.round(handHeightPx)}px</span>
+                            <span>Grand</span>
+                        </div>
+                        <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="0.5"
+                            value={handHeightSlider}
+                            onChange={(e) => setHandHeightSlider(Number(e.target.value))}
+                            className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
+                        />
+                    </div>
+                </div>
+            </div>
         );
     };
 
@@ -538,8 +532,7 @@ export function CalibrationWizard({
                 {/* Bouton confirmer */}
                 <Button
                     onClick={handleConfirm}
-                    disabled={step.type === 'hand' && step.distance === 'close' && !handDetected}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white py-5 text-lg disabled:opacity-50"
+                    className="w-full bg-green-600 hover:bg-green-700 text-white py-5 text-lg"
                 >
                     Confirmer
                     <ChevronRight className="ml-2 h-5 w-5" />
