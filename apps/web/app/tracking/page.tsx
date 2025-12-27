@@ -125,7 +125,6 @@ export default function TrackingPage() {
     isCalibrating,
     isCalibrated,
     setIsCalibrating,
-    currentStep,
     resetCalibration,
   } = useCalibrationStore();
 

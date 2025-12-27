@@ -86,6 +86,31 @@ const PALM_LANDMARKS = {
     middleMcp: 9,
 };
 
+// Connexions pour dessiner le squelette de la main
+const HAND_CONNECTIONS = [
+    // Pouce
+    [0, 1], [1, 2], [2, 3], [3, 4],
+    // Index
+    [0, 5], [5, 6], [6, 7], [7, 8],
+    // Majeur
+    [0, 9], [9, 10], [10, 11], [11, 12],
+    // Annulaire
+    [0, 13], [13, 14], [14, 15], [15, 16],
+    // Auriculaire
+    [0, 17], [17, 18], [18, 19], [19, 20],
+    // Paume
+    [5, 9], [9, 13], [13, 17],
+];
+
+// Ratios anatomiques pour la largeur des doigts par rapport à la largeur de la paume
+// Source: études anthropométriques moyennes
+const FINGER_WIDTH_RATIOS = {
+    index: 0.22,   // ~22% de la largeur paume
+    middle: 0.23,  // ~23% de la largeur paume (le plus large)
+    ring: 0.21,    // ~21% de la largeur paume
+    pinky: 0.18,   // ~18% de la largeur paume (le plus fin)
+};
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -175,15 +200,16 @@ export function CalibrationWizard({
         const toPixels = (lm: { x: number; y: number; z: number }) => ({
             x: lm.x * videoWidth,
             y: lm.y * videoHeight,
-            z: lm.z, // Z est déjà en unités relatives
+            z: lm.z,
         });
 
-        // Calculer la largeur de la paume pour référence
+        // Calculer la largeur de la paume (INDEX_MCP à PINKY_MCP)
         const indexMcp = toPixels(landmarks[PALM_LANDMARKS.indexMcp]);
         const pinkyMcp = toPixels(landmarks[PALM_LANDMARKS.pinkyMcp]);
         const palmWidthPx = Math.sqrt(
             Math.pow(indexMcp.x - pinkyMcp.x, 2) + Math.pow(indexMcp.y - pinkyMcp.y, 2)
         );
+        const palmWidthMm = palmWidthPx / pixelsPerMm;
 
         // Calculer la hauteur de la main
         const wrist = toPixels(landmarks[PALM_LANDMARKS.wrist]);
@@ -192,35 +218,15 @@ export function CalibrationWizard({
             Math.pow(wrist.x - middleTip.x, 2) + Math.pow(wrist.y - middleTip.y, 2)
         );
 
-        // Fonction pour mesurer un doigt
+        // Fonction pour mesurer un doigt basée sur les ratios anatomiques
         const measureFinger = (fingerName: keyof typeof FINGER_LANDMARKS): FingerMeasurement | null => {
-            const fingerLm = FINGER_LANDMARKS[fingerName];
-            const pip = toPixels(landmarks[fingerLm.pip]);
-            const dip = toPixels(landmarks[fingerLm.dip]);
+            // Utiliser le ratio anatomique pour calculer la largeur du doigt
+            const ratio = FINGER_WIDTH_RATIOS[fingerName];
+            const fingerWidthMm = palmWidthMm * ratio;
+            const fingerWidthPx = fingerWidthMm * pixelsPerMm;
 
-            // Largeur du doigt = distance PIP-DIP (approximation)
-            // En réalité on mesure le segment, pas la largeur transversale
-            // Pour la largeur, on estime à ~60% de la longueur du segment PIP-DIP
-            const segmentLength = Math.sqrt(
-                Math.pow(pip.x - dip.x, 2) + Math.pow(pip.y - dip.y, 2)
-            );
-
-            // Estimation de la largeur du doigt (basée sur proportions anatomiques)
-            // Un doigt fait environ 15-20mm de large au niveau de la phalange proximale
-            const fingerWidthPx = segmentLength * 0.7; // Approximation
-            const fingerWidthMm = fingerWidthPx / pixelsPerMm;
-
-            // Pour la profondeur, utiliser worldLandmarks si disponible
-            let depthMm = fingerWidthMm * 0.8; // Par défaut: 80% de la largeur (doigt légèrement aplati)
-
-            if (worldLandmarks && worldLandmarks.length >= 21) {
-                const worldPip = worldLandmarks[fingerLm.pip];
-                const worldDip = worldLandmarks[fingerLm.dip];
-                // La différence Z donne une indication de la profondeur
-                const zDiff = Math.abs(worldPip.z - worldDip.z);
-                // Convertir Z (en mètres dans worldLandmarks) en mm
-                depthMm = Math.max(fingerWidthMm * 0.6, zDiff * 1000 + fingerWidthMm * 0.5);
-            }
+            // La profondeur est généralement 80-90% de la largeur (doigt légèrement ovale)
+            const depthMm = fingerWidthMm * 0.85;
 
             // Calculer la circonférence (forme elliptique)
             const circumference = ellipseCircumference(fingerWidthMm, depthMm);
@@ -243,6 +249,14 @@ export function CalibrationWizard({
             ring: measureFinger('ring'),
             pinky: measureFinger('pinky'),
         };
+
+        console.log('[Calibration] 📏 Mesures calculées:', {
+            palmWidthMm: palmWidthMm.toFixed(1),
+            index: measurements.index?.circumferenceMm.toFixed(1),
+            middle: measurements.middle?.circumferenceMm.toFixed(1),
+            ring: measurements.ring?.circumferenceMm.toFixed(1),
+            pinky: measurements.pinky?.circumferenceMm.toFixed(1),
+        });
 
         return measurements;
     }, [landmarks, worldLandmarks, closeDistance, videoElement, containerWidth, containerHeight]);
@@ -389,113 +403,96 @@ export function CalibrationWizard({
             );
         }
 
-        // Type = hand
+        // Type = hand - Afficher les vrais landmarks MediaPipe
+        // Convertir landmarks normalisés en coordonnées container
+        const landmarksInContainer = landmarks?.map(lm => ({
+            x: lm.x * containerWidth,
+            y: lm.y * containerHeight,
+        })) || [];
+
         return (
             <>
-                {/* Silhouette de main */}
-                <div className="relative flex-1 flex items-center justify-center">
-                    <div
-                        className={`
-                            relative transition-all duration-200
-                            ${handDetected ? 'opacity-80' : 'opacity-50'}
-                        `}
-                        style={{
-                            width: handWidthPx,
-                            height: handHeightPx,
-                        }}
-                    >
-                        {/* SVG de main simplifiée */}
-                        <svg
-                            viewBox="0 0 100 140"
-                            className={`w-full h-full ${handDetected ? 'stroke-green-500' : 'stroke-gray-400'}`}
-                            fill="none"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                        >
-                            {/* Paume */}
-                            <ellipse cx="50" cy="100" rx="35" ry="30" strokeDasharray={handDetected ? "0" : "4 2"} />
+                {/* Zone d'affichage des landmarks */}
+                <div className="relative flex-1 flex items-center justify-center w-full">
+                    {handDetected && landmarks && landmarks.length >= 21 ? (
+                        <>
+                            {/* SVG pour dessiner les landmarks réels */}
+                            <svg
+                                className="absolute inset-0 w-full h-full pointer-events-none"
+                                viewBox={`0 0 ${containerWidth} ${containerHeight}`}
+                                preserveAspectRatio="none"
+                            >
+                                {/* Connexions entre landmarks */}
+                                {HAND_CONNECTIONS.map(([start, end], idx) => (
+                                    <line
+                                        key={`conn-${idx}`}
+                                        x1={landmarksInContainer[start]?.x || 0}
+                                        y1={landmarksInContainer[start]?.y || 0}
+                                        x2={landmarksInContainer[end]?.x || 0}
+                                        y2={landmarksInContainer[end]?.y || 0}
+                                        stroke="#22c55e"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                    />
+                                ))}
 
-                            {/* Doigts */}
-                            {/* Index */}
-                            <path d="M35 75 L35 25 Q35 15 40 15 Q45 15 45 25 L45 75" strokeDasharray={handDetected ? "0" : "4 2"} />
-                            {/* Majeur */}
-                            <path d="M45 70 L45 10 Q45 0 50 0 Q55 0 55 10 L55 70" strokeDasharray={handDetected ? "0" : "4 2"} />
-                            {/* Annulaire */}
-                            <path d="M55 75 L55 20 Q55 10 60 10 Q65 10 65 20 L65 75" strokeDasharray={handDetected ? "0" : "4 2"} />
-                            {/* Auriculaire */}
-                            <path d="M65 80 L65 35 Q65 25 70 25 Q75 25 75 35 L75 80" strokeDasharray={handDetected ? "0" : "4 2"} />
-                            {/* Pouce */}
-                            <path d="M20 90 Q5 85 10 70 Q15 55 25 60 L30 75" strokeDasharray={handDetected ? "0" : "4 2"} />
-                        </svg>
+                                {/* Points des landmarks */}
+                                {landmarksInContainer.map((lm, idx) => (
+                                    <circle
+                                        key={`lm-${idx}`}
+                                        cx={lm.x}
+                                        cy={lm.y}
+                                        r={idx === 0 ? 6 : 4}
+                                        fill={idx === 0 ? "#3b82f6" : "#22c55e"}
+                                        stroke="white"
+                                        strokeWidth="1"
+                                    />
+                                ))}
+                            </svg>
 
-                        {/* Indicateur de détection */}
-                        {handDetected && (
-                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-green-500 text-white text-xs px-2 py-1 rounded">
-                                Main détectée
+                            {/* Indicateur de détection */}
+                            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-green-500 text-white text-sm px-3 py-1.5 rounded-full shadow-lg">
+                                ✅ Main détectée
                             </div>
-                        )}
-                    </div>
 
-                    {/* Affichage des mesures */}
-                    <div className="absolute bottom-4 text-center space-y-1">
-                        <div className="text-sm text-gray-400">
-                            Largeur: <span className="text-cyan-400 font-mono">{Math.round(handWidthPx)}px</span>
-                            {" · "}
-                            Hauteur: <span className="text-cyan-400 font-mono">{Math.round(handHeightPx)}px</span>
+                            {/* Affichage des tailles calculées */}
+                            {calculatedMeasurements && step.distance === 'close' && (
+                                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/80 rounded-lg p-3 text-xs space-y-1">
+                                    <div className="text-green-400 font-semibold mb-2">Tailles de bague calculées:</div>
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                                        <span className="text-gray-400">Index:</span>
+                                        <span className="text-cyan-400 font-mono">
+                                            EU {calculatedMeasurements.index?.ringSizes.eu.toFixed(0)} / US {calculatedMeasurements.index?.ringSizes.us.toFixed(1)}
+                                        </span>
+                                        <span className="text-gray-400">Majeur:</span>
+                                        <span className="text-cyan-400 font-mono">
+                                            EU {calculatedMeasurements.middle?.ringSizes.eu.toFixed(0)} / US {calculatedMeasurements.middle?.ringSizes.us.toFixed(1)}
+                                        </span>
+                                        <span className="text-gray-400">Annulaire:</span>
+                                        <span className="text-cyan-400 font-mono">
+                                            EU {calculatedMeasurements.ring?.ringSizes.eu.toFixed(0)} / US {calculatedMeasurements.ring?.ringSizes.us.toFixed(1)}
+                                        </span>
+                                        <span className="text-gray-400">Auriculaire:</span>
+                                        <span className="text-cyan-400 font-mono">
+                                            EU {calculatedMeasurements.pinky?.ringSizes.eu.toFixed(0)} / US {calculatedMeasurements.pinky?.ringSizes.us.toFixed(1)}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        // Message si pas de main détectée
+                        <div className="text-center space-y-4">
+                            <div className="w-24 h-24 mx-auto rounded-full border-2 border-dashed border-gray-500 flex items-center justify-center">
+                                <Hand className="w-12 h-12 text-gray-500" />
+                            </div>
+                            <div className="text-gray-400">
+                                <p className="text-lg">Montrez votre main ouverte</p>
+                                <p className="text-sm">devant la caméra</p>
+                            </div>
                         </div>
-                        {calculatedMeasurements && step.distance === 'close' && (
-                            <div className="text-xs text-green-400">
-                                Tours de doigt calculés
-                            </div>
-                        )}
-                    </div>
+                    )}
                 </div>
-
-                {/* Sliders pour ajuster manuellement si pas de détection */}
-                {!handDetected && (
-                    <div className="w-full max-w-md px-4 space-y-4">
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-xs text-gray-500">
-                                <span>Étroit</span>
-                                <span className="text-white">Largeur: {Math.round(handWidthPx)}px</span>
-                                <span>Large</span>
-                            </div>
-                            <input
-                                type="range"
-                                min="0"
-                                max="100"
-                                step="0.5"
-                                value={handWidthSlider}
-                                onChange={(e) => setHandWidthSlider(Number(e.target.value))}
-                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-xs text-gray-500">
-                                <span>Court</span>
-                                <span className="text-white">Hauteur: {Math.round(handHeightPx)}px</span>
-                                <span>Grand</span>
-                            </div>
-                            <input
-                                type="range"
-                                min="0"
-                                max="100"
-                                step="0.5"
-                                value={handHeightSlider}
-                                onChange={(e) => setHandHeightSlider(Number(e.target.value))}
-                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                            />
-                        </div>
-                    </div>
-                )}
-
-                {/* Message d'instruction si détection active */}
-                {handDetected && (
-                    <div className="text-sm text-gray-400 text-center px-4">
-                        Ajustez le contour pour qu'il épouse votre main
-                    </div>
-                )}
             </>
         );
     };
