@@ -321,33 +321,41 @@ export function CalibrationWizard({
                         }}
                         className="relative"
                     >
-                        {/* SVG silhouette de main - vraie forme de main */}
+                        {/* SVG silhouette de main - 5 doigts */}
                         <svg
                             width="100%"
                             height="100%"
-                            viewBox="0 0 120 160"
+                            viewBox="0 0 100 140"
                             preserveAspectRatio="none"
                             className="overflow-visible"
                         >
-                            {/* Vraie silhouette de main ouverte */}
-                            <path
-                                d="M60 2
-                                   C64 2 67 5 67 10 L67 50
-                                   L73 50 L73 8 C73 3 76 0 81 0 C86 0 89 3 89 8 L89 52
-                                   L95 52 L95 18 C95 13 98 10 103 10 C108 10 111 13 111 18 L111 70
-                                   C111 72 112 74 114 74 L114 35 C114 30 117 27 120 30 L120 85
-                                   C120 120 100 145 60 158
-                                   C20 145 0 120 0 85 L0 65
-                                   C0 60 3 57 8 60 L8 75 C8 78 10 80 12 78 L12 52
-                                   C12 47 15 44 20 44 C25 44 28 47 28 52 L28 50
-                                   L34 50 L34 10 C34 5 37 2 42 2 C47 2 50 5 50 10 L50 50
-                                   L54 50 L54 10 C54 5 56 2 60 2 Z"
-                                fill="rgba(34, 197, 94, 0.2)"
-                                stroke="#22c55e"
-                                strokeWidth="2.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            />
+                            {/* Paume */}
+                            <rect x="20" y="55" width="60" height="70" rx="10"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Index */}
+                            <rect x="25" y="10" width="12" height="50" rx="6"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Majeur */}
+                            <rect x="40" y="5" width="12" height="55" rx="6"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Annulaire */}
+                            <rect x="55" y="10" width="12" height="50" rx="6"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Auriculaire */}
+                            <rect x="70" y="20" width="10" height="40" rx="5"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Pouce */}
+                            <ellipse cx="10" cy="75" rx="12" ry="25" transform="rotate(-20, 10, 75)"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Poignet */}
+                            <rect x="30" y="120" width="40" height="20" rx="5"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
                         </svg>
                     </div>
 
