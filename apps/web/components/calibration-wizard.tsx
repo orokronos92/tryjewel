@@ -6,9 +6,23 @@ import {
     CREDIT_CARD_WIDTH_MM,
     CREDIT_CARD_HEIGHT_MM,
     HandMeasurements,
+    FingerMeasurement,
+    ellipseCircumference,
+    circumferenceToRingSizes,
 } from "@/stores/calibration-store";
 import { Button } from "@/components/ui/button";
 import { CreditCard, Hand, Check, X, ChevronRight } from "lucide-react";
+
+// Ratios anatomiques pour la largeur des doigts par rapport à la largeur de la paume
+const FINGER_WIDTH_RATIOS = {
+    index: 0.22,   // ~22% de la largeur paume
+    middle: 0.23,  // ~23% de la largeur paume (le plus large)
+    ring: 0.21,    // ~21% de la largeur paume
+    pinky: 0.18,   // ~18% de la largeur paume (le plus fin)
+};
+
+// Ratio profondeur/largeur pour les doigts (ellipse)
+const FINGER_DEPTH_RATIO = 0.85;
 
 // =============================================================================
 // TYPES
@@ -78,12 +92,33 @@ export function CalibrationWizard({
     const {
         currentStep,
         setCurrentStep,
+        closeDistance,
+        farDistance,
         setCloseCardCalibration,
         setCloseHandMeasurements,
         setFarCardCalibration,
         setFarHandMeasurements,
         completeCalibration,
     } = useCalibrationStore();
+
+    // Fonction pour calculer les mesures d'un doigt
+    const calculateFingerMeasurement = (
+        fingerName: keyof typeof FINGER_WIDTH_RATIOS,
+        palmWidthMm: number
+    ): FingerMeasurement => {
+        const widthMm = palmWidthMm * FINGER_WIDTH_RATIOS[fingerName];
+        const depthMm = widthMm * FINGER_DEPTH_RATIO;
+        const circumferenceMm = ellipseCircumference(widthMm, depthMm);
+        const ringSizes = circumferenceToRingSizes(circumferenceMm);
+
+        return {
+            widthPx: 0, // Non utilisé dans cette méthode
+            widthMm,
+            depthMm,
+            circumferenceMm,
+            ringSizes,
+        };
+    };
 
     // État local pour les sliders de main
     const [handWidthSlider, setHandWidthSlider] = useState(50);
@@ -132,15 +167,37 @@ export function CalibrationWizard({
                 setFarCardCalibration(fixedCardWidth);
             }
         } else {
-            // Sauvegarder les mesures de main (taille ajustée par l'utilisateur)
+            // Récupérer le pixelsPerMm de la carte pour cette distance
+            const calibrationData = step.distance === 'close' ? closeDistance : farDistance;
+            const pixelsPerMm = calibrationData?.pixelsPerMm || 1;
+
+            // Calculer la largeur de la paume en mm
+            // La largeur du contour SVG représente la largeur de la main
+            // On estime que la paume fait ~60% de la largeur totale de la main
+            const palmWidthMm = (handWidthPx / pixelsPerMm) * 0.6;
+
+            console.log('[Calibration] 📏 Calcul des tailles:', {
+                handWidthPx,
+                pixelsPerMm,
+                palmWidthMm,
+            });
+
+            // Calculer les mesures de chaque doigt
             const handMeasurements: HandMeasurements = {
                 handWidthPx,
                 handHeightPx,
-                index: null,
-                middle: null,
-                ring: null,
-                pinky: null,
+                index: calculateFingerMeasurement('index', palmWidthMm),
+                middle: calculateFingerMeasurement('middle', palmWidthMm),
+                ring: calculateFingerMeasurement('ring', palmWidthMm),
+                pinky: calculateFingerMeasurement('pinky', palmWidthMm),
             };
+
+            console.log('[Calibration] 💍 Tailles calculées:', {
+                index: handMeasurements.index?.ringSizes.eu,
+                middle: handMeasurements.middle?.ringSizes.eu,
+                ring: handMeasurements.ring?.ringSizes.eu,
+                pinky: handMeasurements.pinky?.ringSizes.eu,
+            });
 
             if (step.distance === 'close') {
                 setCloseHandMeasurements(handMeasurements);
@@ -240,53 +297,63 @@ export function CalibrationWizard({
             );
         }
 
-        // Type = hand - Contour de MAIN ajustable (silhouette)
+        // Type = hand - Contour de MAIN ajustable (silhouette propre)
         return (
             <div className="relative w-full h-full flex flex-col">
-                {/* Zone centrale - contour de main (silhouette SVG) */}
+                {/* Zone centrale - contour de main (silhouette SVG propre) */}
                 <div className="flex-1 flex items-center justify-center relative">
-                    {/* SVG contour de main ajustable */}
+                    {/* SVG silhouette de main - contour simple et propre */}
                     <svg
                         width={handWidthPx}
                         height={handHeightPx}
-                        viewBox="0 0 200 280"
+                        viewBox="0 0 100 140"
                         className="overflow-visible"
                         style={{ transition: 'width 0.1s, height 0.1s' }}
                     >
-                        {/* Contour de main stylisé */}
+                        {/* Silhouette de main - contour unique */}
                         <path
-                            d="M100 10
-                               L100 70
-                               M70 15 L70 80
-                               M130 15 L130 80
-                               M160 35 L160 90
-                               M40 60 Q20 70 25 100 L45 110
-                               M40 110 L40 200 Q40 250 70 260 L130 260 Q160 250 160 200 L160 110
-                               M40 110 Q40 90 70 80 L130 80 Q160 90 160 110"
-                            fill="none"
+                            d="M50 5
+                               C53 5 55 3 55 8 L55 45
+                               C55 48 58 50 60 50
+                               L65 50 C68 50 70 48 70 45 L70 15
+                               C70 10 72 8 75 8 C78 8 80 10 80 15 L80 50
+                               C80 53 82 55 85 55
+                               L85 25 C85 20 87 18 90 18 C93 18 95 20 95 25 L95 70
+                               C95 100 80 120 50 135
+                               C20 120 5 100 5 70 L5 55
+                               C5 50 7 48 10 48 C13 48 15 50 15 55 L15 65
+                               C15 68 18 70 20 68 L20 45
+                               C20 40 22 38 25 38 C28 38 30 40 30 45 L30 50
+                               C30 53 33 55 35 55
+                               L40 55 C43 55 45 53 45 50 L45 8
+                               C45 3 47 5 50 5 Z"
+                            fill="rgba(34, 197, 94, 0.15)"
                             stroke="#22c55e"
-                            strokeWidth="3"
+                            strokeWidth="2"
                             strokeLinecap="round"
                             strokeLinejoin="round"
                         />
-                        {/* Doigts */}
-                        <ellipse cx="70" cy="15" rx="12" ry="20" fill="none" stroke="#22c55e" strokeWidth="3" />
-                        <ellipse cx="100" cy="10" rx="12" ry="22" fill="none" stroke="#22c55e" strokeWidth="3" />
-                        <ellipse cx="130" cy="15" rx="12" ry="20" fill="none" stroke="#22c55e" strokeWidth="3" />
-                        <ellipse cx="160" cy="35" rx="10" ry="18" fill="none" stroke="#22c55e" strokeWidth="3" />
-                        {/* Pouce */}
-                        <ellipse cx="30" cy="85" rx="15" ry="25" fill="none" stroke="#22c55e" strokeWidth="3" transform="rotate(-30, 30, 85)" />
-                        {/* Paume */}
-                        <ellipse cx="100" cy="180" rx="60" ry="70" fill="none" stroke="#22c55e" strokeWidth="3" strokeDasharray="8 4" />
+                        {/* Lignes indicatrices pour les doigts (où mesurer) */}
+                        <line x1="45" y1="50" x2="55" y2="50" stroke="#22c55e" strokeWidth="1" strokeDasharray="2 2" opacity="0.7" />
+                        <line x1="60" y1="50" x2="70" y2="50" stroke="#22c55e" strokeWidth="1" strokeDasharray="2 2" opacity="0.7" />
+                        <line x1="75" y1="55" x2="85" y2="55" stroke="#22c55e" strokeWidth="1" strokeDasharray="2 2" opacity="0.7" />
                     </svg>
 
-                    {/* Labels dimensions */}
-                    <div className="absolute top-1/2 -right-4 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
-                        {Math.round(handHeightPx)}px
-                    </div>
-                    <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
-                        {Math.round(handWidthPx)}px
-                    </div>
+                    {/* Labels dimensions en mm (calculées avec le pixelsPerMm de la distance actuelle) */}
+                    {(() => {
+                        const ppm = step.distance === 'close' ? closeDistance?.pixelsPerMm : farDistance?.pixelsPerMm;
+                        if (!ppm) return null;
+                        return (
+                            <>
+                                <div className="absolute top-1/2 -right-16 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                                    {Math.round(handHeightPx / ppm)} mm
+                                </div>
+                                <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                                    {Math.round(handWidthPx / ppm)} mm
+                                </div>
+                            </>
+                        );
+                    })()}
                 </div>
 
                 {/* Sliders en bas */}
