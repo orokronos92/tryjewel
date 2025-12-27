@@ -111,7 +111,8 @@ const MEDIAPIPE_INPUT_WIDTH = 320;
 const MEDIAPIPE_INPUT_HEIGHT = 240;
 
 // ⚡ WEB WORKER: Activer/désactiver le mode worker
-const USE_WEB_WORKER = true;
+// Temporairement désactivé pour diagnostiquer le problème d'init
+const USE_WEB_WORKER = false;
 const WASM_PATH = "/mediapipe/wasm";
 const MODEL_PATH = "/mediapipe/models/hand_landmarker.task";
 
