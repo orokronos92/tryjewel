@@ -17,11 +17,14 @@ import {
 } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Activity, Smartphone } from "lucide-react";
+import { Activity, Smartphone, Sparkles } from "lucide-react";
 import { ARAdjustmentControls } from "@/components/ar-adjustment-controls";
 import { PerformanceDebugMini } from '@/components/performance-debug';
 import { usePerformanceStore, useTierConfig } from '@/stores/performance-store';
 import { getTierName } from '@/lib/adaptive-performance';
+import { CalibrationWizard } from '@/components/calibration-wizard';
+import { RingSizeIndicatorCompact, RingSizeSummary } from '@/components/ring-size-indicator';
+import { useCalibrationStore } from '@/stores/calibration-store';
 
 // =============================================================================
 // IMPORTS DYNAMIQUES (SSR disabled)
@@ -118,6 +121,12 @@ export default function TrackingPage() {
   const { camera } = useCameraStore();
   const { tracking, updateTrackingResult, setTracking, updateFPS } = useEdgeTrackingStore();
   const { selected } = useJewelryStore();
+  const {
+    isCalibrating,
+    isCalibrated,
+    setIsCalibrating,
+    currentStep,
+  } = useCalibrationStore();
 
   // ⚡ PERFORMANCE ADAPTATIF - Récupérer la config du tier actuel
   const tierConfig = useTierConfig();
@@ -272,6 +281,32 @@ export default function TrackingPage() {
   }, []);
 
   // ==========================================================================
+  // CALIBRATION
+  // ==========================================================================
+
+  const handleCalibrateAndStart = useCallback(() => {
+    if (!isCalibrated) {
+      // Lancer la calibration d'abord
+      setIsCalibrating(true);
+    } else {
+      // Déjà calibré, démarrer directement
+      startTracking();
+    }
+  }, [isCalibrated, setIsCalibrating, startTracking]);
+
+  const handleCalibrationClose = useCallback(() => {
+    setIsCalibrating(false);
+    // Si la calibration est complète, démarrer le tracking
+    if (useCalibrationStore.getState().isCalibrated) {
+      startTracking();
+    }
+  }, [setIsCalibrating, startTracking]);
+
+  // Récupérer les landmarks pour la calibration
+  const currentLandmarks = tracking.last_result?.hand_result?.landmarks ?? null;
+  const currentWorldLandmarks = tracking.last_result?.hand_result?.world_landmarks ?? null;
+
+  // ==========================================================================
   // RENDER
   // ==========================================================================
 
@@ -309,23 +344,40 @@ export default function TrackingPage() {
 
               {/* Bijou 3D - v11.0 UNIFIÉ (inclut tous les calculs) */}
               {/* ⚡ FIX: Monter une seule fois, Jewelry3D gère la visibilité en interne */}
-              {isTracking && (
+              {isTracking && !isCalibrating && (
                 <Jewelry3D
                   videoWidth={videoDimensions?.width}
                   videoHeight={videoDimensions?.height}
                 />
               )}
 
+              {/* Wizard de calibration */}
+              {isCalibrating && videoDimensions && (
+                <CalibrationWizard
+                  onClose={handleCalibrationClose}
+                  containerWidth={videoDimensions.width}
+                  containerHeight={videoDimensions.height}
+                  videoElement={videoElement}
+                  landmarks={currentLandmarks}
+                  worldLandmarks={currentWorldLandmarks}
+                />
+              )}
+
               {/* Overlay compact mobile */}
-              {isTracking && camera.isActive && (
+              {isTracking && camera.isActive && !isCalibrating && (
                 <div className="absolute top-16 left-2 bg-black/60 text-white px-2 py-1 rounded text-xs z-20">
                   {tracking.last_result?.success ? "✅" : "🔍"} {fps.toFixed(0)} FPS
                   <span className="ml-2 opacity-70">T{currentTier}</span>
                 </div>
               )}
 
+              {/* Indicateur de taille de bague */}
+              {isTracking && !isCalibrating && isCalibrated && (
+                <RingSizeIndicatorCompact className="absolute top-16 right-2 z-20" />
+              )}
+
               {/* Contrôles AR */}
-              {isTracking && <ARAdjustmentControls />}
+              {isTracking && !isCalibrating && <ARAdjustmentControls />}
             </div>
           )}
 
@@ -419,14 +471,28 @@ export default function TrackingPage() {
                 {/* Bouton */}
                 <div className="pt-3 sm:pt-4 border-t">
                   <Button
-                    onClick={isTracking ? stopTracking : startTracking}
+                    onClick={isTracking ? stopTracking : handleCalibrateAndStart}
                     disabled={!camera.isActive || !isInitialized || !videoElement}
                     variant={isTracking ? "destructive" : "default"}
                     className="w-full text-sm"
                   >
-                    {isTracking ? "⏹️ Arrêter" : "🚀 Démarrer"}
+                    {isTracking ? (
+                      "⏹️ Arrêter"
+                    ) : isCalibrated ? (
+                      "🚀 Démarrer"
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 mr-1" />
+                        Calibrer & Démarrer
+                      </>
+                    )}
                   </Button>
                 </div>
+
+                {/* Résumé des tailles si calibré */}
+                {isCalibrated && !isTracking && (
+                  <RingSizeSummary className="mt-4" />
+                )}
               </div>
             </Card>
           </div>
@@ -444,15 +510,27 @@ export default function TrackingPage() {
 
               {/* Bijou 3D - v11.0 UNIFIÉ */}
               {/* ⚡ FIX: Monter une seule fois, Jewelry3D gère la visibilité en interne */}
-              {isTracking && (
+              {isTracking && !isCalibrating && (
                 <Jewelry3D
                   videoWidth={videoDimensions?.width}
                   videoHeight={videoDimensions?.height}
                 />
               )}
 
+              {/* Wizard de calibration */}
+              {isCalibrating && videoDimensions && (
+                <CalibrationWizard
+                  onClose={handleCalibrationClose}
+                  containerWidth={videoDimensions.width}
+                  containerHeight={videoDimensions.height}
+                  videoElement={videoElement}
+                  landmarks={currentLandmarks}
+                  worldLandmarks={currentWorldLandmarks}
+                />
+              )}
+
               {/* Overlay desktop */}
-              {isTracking && camera.isActive && (
+              {isTracking && camera.isActive && !isCalibrating && (
                 <div className="absolute top-8 left-8 bg-black/70 text-white px-3 py-2 rounded-lg z-20">
                   <div className="text-sm font-medium">🎯 Edge Computing</div>
                   <div className="text-xs text-green-400">
@@ -469,8 +547,13 @@ export default function TrackingPage() {
                 </div>
               )}
 
+              {/* Indicateur de taille de bague */}
+              {isTracking && !isCalibrating && isCalibrated && (
+                <RingSizeIndicatorCompact className="absolute top-8 right-8 z-20" />
+              )}
+
               {/* Contrôles AR */}
-              {isTracking && <ARAdjustmentControls />}
+              {isTracking && !isCalibrating && <ARAdjustmentControls />}
             </div>
           )}
         </div>
