@@ -350,11 +350,11 @@ export function CalibrationWizard({
 
         if (step.type === 'card') {
             return (
-                <>
-                    {/* Cadre de la carte */}
-                    <div className="relative flex-1 flex items-center justify-center">
+                <div className="relative w-full h-full flex flex-col">
+                    {/* Zone centrale - cadre de la carte */}
+                    <div className="flex-1 flex items-center justify-center">
                         <div
-                            className="border-2 border-blue-500 bg-blue-500/10 shadow-[0_0_20px_rgba(59,130,246,0.4)] relative rounded-lg"
+                            className="border-2 border-blue-500 bg-blue-500/20 shadow-[0_0_30px_rgba(59,130,246,0.5)] relative rounded-lg"
                             style={{
                                 width: cardWidthPx,
                                 height: cardHeightPx,
@@ -362,44 +362,41 @@ export function CalibrationWizard({
                             }}
                         >
                             {/* Coins décoratifs */}
-                            <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-blue-400 rounded-tl" />
-                            <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-blue-400 rounded-tr" />
-                            <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-blue-400 rounded-bl" />
-                            <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-blue-400 rounded-br" />
+                            <div className="absolute -top-1 -left-1 w-5 h-5 border-t-2 border-l-2 border-blue-400 rounded-tl" />
+                            <div className="absolute -top-1 -right-1 w-5 h-5 border-t-2 border-r-2 border-blue-400 rounded-tr" />
+                            <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-2 border-l-2 border-blue-400 rounded-bl" />
+                            <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-2 border-r-2 border-blue-400 rounded-br" />
 
                             {/* Label dimensions */}
-                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 text-xs font-mono text-cyan-400">
+                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-cyan-400">
                                 {CREDIT_CARD_WIDTH_MM} mm
                             </div>
-                            <div className="absolute top-1/2 -right-12 -translate-y-1/2 text-xs font-mono text-cyan-400">
+                            <div className="absolute top-1/2 -right-14 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-cyan-400">
                                 {CREDIT_CARD_HEIGHT_MM.toFixed(0)} mm
                             </div>
                         </div>
-
-                        {/* Affichage pixels */}
-                        <div className="absolute bottom-4 text-center text-sm text-gray-400">
-                            {Math.round(cardWidthPx)}px
-                        </div>
                     </div>
 
-                    {/* Slider */}
-                    <div className="w-full max-w-md px-4 space-y-2">
-                        <div className="flex justify-between text-xs text-gray-500">
-                            <span>Plus petit</span>
-                            <span className="text-blue-400 font-mono">{Math.round(cardWidthPx)}px</span>
-                            <span>Plus grand</span>
+                    {/* Slider en bas */}
+                    <div className="bg-black/70 p-4 rounded-t-lg">
+                        <div className="max-w-md mx-auto space-y-2">
+                            <div className="flex justify-between text-xs text-gray-300">
+                                <span>Plus petit</span>
+                                <span className="text-blue-400 font-mono">{Math.round(cardWidthPx)}px</span>
+                                <span>Plus grand</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="0.5"
+                                value={sliderValue}
+                                onChange={(e) => setSliderValue(Number(e.target.value))}
+                                className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                            />
                         </div>
-                        <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            step="0.5"
-                            value={sliderValue}
-                            onChange={(e) => setSliderValue(Number(e.target.value))}
-                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                        />
                     </div>
-                </>
+                </div>
             );
         }
 
@@ -481,15 +478,9 @@ export function CalibrationWizard({
                             )}
                         </>
                     ) : (
-                        // Message si pas de main détectée
-                        <div className="text-center space-y-4">
-                            <div className="w-24 h-24 mx-auto rounded-full border-2 border-dashed border-gray-500 flex items-center justify-center">
-                                <Hand className="w-12 h-12 text-gray-500" />
-                            </div>
-                            <div className="text-gray-400">
-                                <p className="text-lg">Montrez votre main ouverte</p>
-                                <p className="text-sm">devant la caméra</p>
-                            </div>
+                        // Message discret si pas de main détectée
+                        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-yellow-500/90 text-black text-sm px-4 py-2 rounded-full shadow-lg">
+                            🖐️ Montrez votre main ouverte
                         </div>
                     )}
                 </div>
@@ -500,53 +491,55 @@ export function CalibrationWizard({
     if (!step) return null;
 
     return (
-        <div className="absolute inset-0 z-50 flex flex-col bg-black/60 backdrop-blur-sm text-white">
-            {/* Header */}
-            <div className="p-4 flex items-center justify-between">
+        <div className="absolute inset-0 z-50 flex flex-col text-white">
+            {/* Header - fond semi-transparent */}
+            <div className="p-4 flex items-center justify-between bg-black/70">
                 <div className="flex items-center gap-2">
                     {step.icon}
-                    <span className="text-sm text-gray-400">Selfie</span>
+                    <span className="text-sm text-gray-300">Calibration</span>
                 </div>
                 <Button
                     variant="ghost"
                     size="icon"
                     onClick={onClose}
-                    className="text-white hover:bg-white/10 rounded-full"
+                    className="text-white hover:bg-white/20 rounded-full"
                 >
                     <X className="h-5 w-5" />
                 </Button>
             </div>
 
-            {/* Titre de l'étape */}
-            <div className="px-4 pb-2">
-                <h2 className="text-xl font-semibold flex items-center gap-2">
+            {/* Titre de l'étape - fond semi-transparent */}
+            <div className="px-4 py-2 bg-black/70">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
                     {step.icon}
                     Étape {currentStep}/4 : {step.title}
                 </h2>
                 <p className="text-sm text-gray-300 mt-1">{step.instruction}</p>
+                {/* Indicateurs de progression */}
+                <div className="mt-3">
+                    {renderStepIndicators()}
+                </div>
             </div>
 
-            {/* Indicateurs de progression */}
-            {renderStepIndicators()}
-
-            {/* Contenu principal */}
+            {/* Contenu principal - TRANSPARENT pour voir la caméra */}
             <div className="flex-1 flex flex-col items-center justify-center p-4 gap-4">
                 {renderStepContent()}
             </div>
 
-            {/* Infos caméra */}
-            <div className="px-4 py-2 text-xs text-gray-500 flex gap-4">
-                <span>Résolution: {videoElement?.videoWidth || 0}×{videoElement?.videoHeight || 0}</span>
-                <span>Caméra: Frontale</span>
-                <span>Miroir: Oui</span>
-            </div>
+            {/* Footer avec bouton - fond semi-transparent */}
+            <div className="bg-black/70 p-4 space-y-2">
+                {/* Infos caméra */}
+                <div className="text-xs text-gray-400 flex gap-4 justify-center">
+                    <span>{videoElement?.videoWidth || 0}×{videoElement?.videoHeight || 0}</span>
+                    <span>•</span>
+                    <span>Caméra frontale</span>
+                </div>
 
-            {/* Bouton confirmer */}
-            <div className="p-4">
+                {/* Bouton confirmer */}
                 <Button
                     onClick={handleConfirm}
                     disabled={step.type === 'hand' && step.distance === 'close' && !handDetected}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white py-6 text-lg disabled:opacity-50"
+                    className="w-full bg-green-600 hover:bg-green-700 text-white py-5 text-lg disabled:opacity-50"
                 >
                     Confirmer
                     <ChevronRight className="ml-2 h-5 w-5" />
