@@ -366,6 +366,9 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             const result = storeCache.tracking?.last_result;
             if (!result || !result.success || !result.hand_result?.landmarks) {
                 if (ringRef.current) ringRef.current.visible = false;
+                // ⚡ FIX: Cacher aussi les axes quand pas de tracking
+                if (ringAxesRef.current) ringAxesRef.current.visible = false;
+                if (boneAxesRef.current) boneAxesRef.current.visible = false;
                 renderer.render(scene, camera);
                 return;
             }
