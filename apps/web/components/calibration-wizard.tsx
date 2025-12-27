@@ -116,8 +116,21 @@ export function CalibrationWizard({
     const [handDetected, setHandDetected] = useState(false);
     const [calculatedMeasurements, setCalculatedMeasurements] = useState<HandMeasurements | null>(null);
 
-    const stepIndex = currentStep - 1; // currentStep est 1-indexed
+    // ⚡ FIX: Toujours utiliser un index valide (0-3)
+    // Si currentStep est 0 ou invalide, on force l'affichage de l'étape 1
+    const stepIndex = Math.max(0, Math.min(3, currentStep - 1));
     const step = STEPS[stepIndex];
+
+    // Debug log
+    console.log('[CalibrationWizard] 🎯 Render:', { currentStep, stepIndex, stepTitle: step.title });
+
+    // ⚡ FIX: Synchroniser le store si currentStep est invalide
+    useEffect(() => {
+        if (currentStep < 1) {
+            console.log('[CalibrationWizard] ⚠️ currentStep invalide, correction à 1');
+            setCurrentStep(1);
+        }
+    }, [currentStep, setCurrentStep]);
 
     // Conversion slider vers pixels pour la carte
     const getCardWidthPx = (val: number) => {

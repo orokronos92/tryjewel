@@ -3,15 +3,14 @@
 import { useState } from "react";
 import { useSkeletonAdjustmentStore } from "@/stores/skeleton-adjustment-store";
 import { useRingAdjustmentStore } from "@/stores/ring-adjustment-store";
-import { useCalibrationStore } from "@/stores/calibration-store";
-import { RotateCcw, ChevronDown, ChevronUp, Ruler } from "lucide-react";
+import { RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
 
 /**
  * Composant de contrÃ´le pour ajuster le squelette et la bague AR
  * Widget avec sections dÃ©roulantes pour organiser les contrÃ´les
  */
 export function ARAdjustmentControls() {
-    const [openSection, setOpenSection] = useState<'skeleton' | 'ring' | 'calibration' | null>('skeleton');
+    const [openSection, setOpenSection] = useState<'skeleton' | 'ring' | null>('skeleton');
 
     // Skeleton store
     const skeleton = useSkeletonAdjustmentStore();
@@ -19,10 +18,7 @@ export function ARAdjustmentControls() {
     // Ring store
     const ring = useRingAdjustmentStore();
 
-    // Calibration store
-    const { setIsCalibrating, isCalibrated, resetCalibration } = useCalibrationStore();
-
-    const toggleSection = (section: 'skeleton' | 'ring' | 'calibration') => {
+    const toggleSection = (section: 'skeleton' | 'ring') => {
         setOpenSection(openSection === section ? null : section);
     };
 
@@ -287,46 +283,6 @@ export function ARAdjustmentControls() {
                                 className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-yellow-500"
                             />
                         </div>
-                    </div>
-                )}
-            </div>
-
-            {/* Section Calibration */}
-            <div className="border-t border-white/10">
-                <div
-                    onClick={() => toggleSection('calibration')}
-                    className="w-full px-2 py-2 flex items-center justify-between hover:bg-white/5 transition-colors cursor-pointer"
-                >
-                    <div className="flex items-center gap-2">
-                        <Ruler size={14} className={isCalibrated ? "text-green-400" : "text-gray-400"} />
-                        <span className="text-[10px] font-medium">
-                            Calibration {isCalibrated && "✅"}
-                        </span>
-                    </div>
-                    {openSection === 'calibration' ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                </div>
-
-                {openSection === 'calibration' && (
-                    <div className="px-2 pb-2 space-y-2 text-[10px]">
-                        <p className="text-gray-400 leading-tight">
-                            Utilisez une carte bancaire pour calibrer l'échelle réelle.
-                        </p>
-
-                        <button
-                            onClick={() => setIsCalibrating(true)}
-                            className="w-full bg-blue-600 hover:bg-blue-500 text-white rounded px-2 py-1.5 transition-colors"
-                        >
-                            {isCalibrated ? "Recalibrer" : "Lancer Calibration"}
-                        </button>
-
-                        {isCalibrated && (
-                            <button
-                                onClick={resetCalibration}
-                                className="w-full bg-red-900/50 hover:bg-red-900 text-red-200 rounded px-2 py-1.5 transition-colors"
-                            >
-                                Réinitialiser
-                            </button>
-                        )}
                     </div>
                 )}
             </div>
