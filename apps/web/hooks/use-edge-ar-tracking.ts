@@ -110,6 +110,124 @@ const FILTER_BETA = 20.0;
 const MEDIAPIPE_INPUT_WIDTH = 320;
 const MEDIAPIPE_INPUT_HEIGHT = 240;
 
+// ⚡ WEB WORKER: Activer/désactiver le mode worker
+const USE_WEB_WORKER = true;
+const WASM_PATH = "/mediapipe/wasm";
+const MODEL_PATH = "/mediapipe/models/hand_landmarker.task";
+
+// =============================================================================
+// WEB WORKER SINGLETON
+// =============================================================================
+
+type WorkerState = "idle" | "loading" | "ready" | "error";
+
+interface WorkerSingleton {
+    state: WorkerState;
+    instance: Worker | null;
+    error: Error | null;
+    waiters: Array<{ resolve: (w: Worker) => void; reject: (err: Error) => void }>;
+}
+
+const workerSingleton: WorkerSingleton = {
+    state: "idle",
+    instance: null,
+    error: null,
+    waiters: [],
+};
+
+async function getWorkerSingleton(config: {
+    numHands: number;
+    modelComplexity: 0 | 1;
+    minDetectionConfidence: number;
+    minTrackingConfidence: number;
+}): Promise<Worker> {
+    if (workerSingleton.state === "ready" && workerSingleton.instance) {
+        return workerSingleton.instance;
+    }
+
+    if (workerSingleton.state === "loading") {
+        return await new Promise<Worker>((resolve, reject) => {
+            workerSingleton.waiters.push({ resolve, reject });
+        });
+    }
+
+    if (workerSingleton.state === "error") {
+        throw workerSingleton.error ?? new Error("Worker en erreur");
+    }
+
+    workerSingleton.state = "loading";
+
+    try {
+        // Créer le worker
+        const worker = new Worker(
+            new URL('../workers/mediapipe.worker.ts', import.meta.url),
+            { type: 'module' }
+        );
+
+        // Attendre l'initialisation
+        await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error("Worker init timeout"));
+            }, 30000);
+
+            worker.onmessage = (e) => {
+                if (e.data.type === 'init_complete') {
+                    clearTimeout(timeout);
+                    if (e.data.success) {
+                        resolve();
+                    } else {
+                        reject(new Error(e.data.error || "Worker init failed"));
+                    }
+                }
+            };
+
+            worker.onerror = (err) => {
+                clearTimeout(timeout);
+                reject(new Error(err.message));
+            };
+
+            // Envoyer le message d'init
+            worker.postMessage({
+                type: 'init',
+                wasmPath: WASM_PATH,
+                modelPath: MODEL_PATH,
+                config: {
+                    numHands: config.numHands,
+                    modelComplexity: config.modelComplexity,
+                    minDetectionConfidence: config.minDetectionConfidence,
+                    minTrackingConfidence: config.minTrackingConfidence,
+                },
+            });
+        });
+
+        workerSingleton.instance = worker;
+        workerSingleton.state = "ready";
+
+        const waiters = [...workerSingleton.waiters];
+        workerSingleton.waiters = [];
+        waiters.forEach((w) => w.resolve(worker));
+
+        console.log("%c[WebWorker] ✅ MediaPipe Worker prêt", "color:#00ff00;font-weight:bold");
+        return worker;
+
+    } catch (err: any) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        workerSingleton.error = error;
+        workerSingleton.state = "error";
+
+        const waiters = [...workerSingleton.waiters];
+        workerSingleton.waiters = [];
+        waiters.forEach((w) => w.reject(error));
+
+        console.error("[WebWorker] ❌ Init Worker failed", error);
+        throw error;
+    }
+}
+
+function isWorkerReady(): boolean {
+    return workerSingleton.state === "ready" && !!workerSingleton.instance;
+}
+
 // =============================================================================
 // SINGLETON / MUTEX (avoid multi instances)
 // =============================================================================
@@ -303,21 +421,37 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
         };
     }, []);
 
-    // init landmarker
+    // init landmarker (mode worker ou direct)
     useEffect(() => {
         let cancelled = false;
 
         (async () => {
             try {
                 setError(null);
-                await getHandLandmarkerSingleton({
-                    minDetectionConfidence,
-                    minTrackingConfidence,
-                    numHands: 1,
-                    modelComplexity: options.modelComplexity ?? 0, // ⚡ Passe le paramètre de qualité
-                });
+
+                if (USE_WEB_WORKER) {
+                    // ⚡ Mode Web Worker - détection dans un thread séparé
+                    console.log("[AR] 🔧 Initialisation en mode Web Worker...");
+                    await getWorkerSingleton({
+                        numHands: 1,
+                        modelComplexity: (options.modelComplexity ?? 0) as 0 | 1,
+                        minDetectionConfidence,
+                        minTrackingConfidence,
+                    });
+                } else {
+                    // Mode classique - détection sur thread principal
+                    console.log("[AR] 🔧 Initialisation en mode direct...");
+                    await getHandLandmarkerSingleton({
+                        minDetectionConfidence,
+                        minTrackingConfidence,
+                        numHands: 1,
+                        modelComplexity: options.modelComplexity ?? 0,
+                    });
+                }
+
                 if (!cancelled) setIsInitialized(true);
-            } catch {
+            } catch (err) {
+                console.error("[AR] Init error:", err);
                 if (!cancelled) {
                     setIsInitialized(false);
                     setError("Votre appareil/navigateur ne supporte pas le tracking AR.");
@@ -452,7 +586,13 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
 
     const startTracking = useCallback(() => {
         if (!videoElementRef.current) return;
-        if (!isLandmarkerReady()) return;
+
+        // Vérifier que le bon mode est prêt
+        if (USE_WEB_WORKER) {
+            if (!isWorkerReady()) return;
+        } else {
+            if (!isLandmarkerReady()) return;
+        }
 
         isTrackingRef.current = true;
         setIsTracking(true);
@@ -480,7 +620,14 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
 
     const processFrame = useCallback(async () => {
         const video = videoElementRef.current;
-        if (!video || !isTrackingRef.current || !isLandmarkerReady()) return;
+        if (!video || !isTrackingRef.current) return;
+
+        // Vérifier le bon mode
+        if (USE_WEB_WORKER) {
+            if (!isWorkerReady()) return;
+        } else {
+            if (!isLandmarkerReady()) return;
+        }
 
         frameCountRef.current += 1;
         const skip = Math.max(1, frameSkipRef.current || 1);
@@ -489,51 +636,114 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
         const t0 = performance.now();
 
         try {
-            const landmarker = landmarkerMutex.instance;
             const nowMs = performance.now();
 
             if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) return;
 
-            // ⚡ PERF: Dessiner la vidéo sur le canvas offscreen en basse résolution
-            const offscreenCanvas = offscreenCanvasRef.current;
-            const offscreenCtx = offscreenCtxRef.current;
+            let landmarks: HandLandmark[] | null = null;
+            let worldLandmarks: HandLandmark[] | null = null;
+            let handedness: string = "Right";
+            let handednessScore: number = 0;
 
-            let inputSource: HTMLVideoElement | HTMLCanvasElement = video;
+            if (USE_WEB_WORKER) {
+                // ⚡ MODE WORKER: Envoyer l'image au worker pour traitement
+                const worker = workerSingleton.instance!;
 
-            if (offscreenCanvas && offscreenCtx) {
-                // Dessiner la frame vidéo redimensionnée sur le canvas offscreen
-                offscreenCtx.drawImage(video, 0, 0, MEDIAPIPE_INPUT_WIDTH, MEDIAPIPE_INPUT_HEIGHT);
-                inputSource = offscreenCanvas;
+                // Créer un ImageBitmap à partir de la vidéo (transférable au worker)
+                const imageBitmap = await createImageBitmap(video, {
+                    resizeWidth: MEDIAPIPE_INPUT_WIDTH,
+                    resizeHeight: MEDIAPIPE_INPUT_HEIGHT,
+                });
+
+                // Envoyer au worker et attendre la réponse
+                const workerResult = await new Promise<{
+                    success: boolean;
+                    landmarks: HandLandmark[] | null;
+                    worldLandmarks: HandLandmark[] | null;
+                    handedness: string;
+                    handednessScore: number;
+                    processingTimeMs: number;
+                }>((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error("Worker detection timeout"));
+                    }, 5000);
+
+                    const handler = (e: MessageEvent) => {
+                        if (e.data.type === 'result') {
+                            clearTimeout(timeout);
+                            worker.removeEventListener('message', handler);
+                            resolve(e.data);
+                        } else if (e.data.type === 'error') {
+                            clearTimeout(timeout);
+                            worker.removeEventListener('message', handler);
+                            reject(new Error(e.data.error));
+                        }
+                    };
+
+                    worker.addEventListener('message', handler);
+
+                    // Envoyer l'image au worker (transfert de propriété de l'ImageBitmap)
+                    worker.postMessage(
+                        {
+                            type: 'detect',
+                            imageBitmap,
+                            timestamp: nowMs,
+                        },
+                        [imageBitmap] // Transferable - évite la copie mémoire
+                    );
+                });
+
+                landmarks = workerResult.landmarks;
+                worldLandmarks = workerResult.worldLandmarks;
+                handedness = workerResult.handedness;
+                handednessScore = workerResult.handednessScore;
+
+            } else {
+                // MODE DIRECT: Détection sur le thread principal
+                const landmarker = landmarkerMutex.instance;
+
+                // ⚡ PERF: Dessiner la vidéo sur le canvas offscreen en basse résolution
+                const offscreenCanvas = offscreenCanvasRef.current;
+                const offscreenCtx = offscreenCtxRef.current;
+
+                let inputSource: HTMLVideoElement | HTMLCanvasElement = video;
+
+                if (offscreenCanvas && offscreenCtx) {
+                    offscreenCtx.drawImage(video, 0, 0, MEDIAPIPE_INPUT_WIDTH, MEDIAPIPE_INPUT_HEIGHT);
+                    inputSource = offscreenCanvas;
+                }
+
+                let result: TasksHandLandmarkerResult;
+                try {
+                    result = landmarker.detectForVideo(inputSource, nowMs) as TasksHandLandmarkerResult;
+                } catch (err) {
+                    console.warn("[MediaPipe] Detect error:", err);
+                    return;
+                }
+
+                const handed = pickBestHandedness(result);
+                handedness = handed.label;
+                handednessScore = handed.score;
+                landmarks = toHandLandmarks(result.landmarks?.[0]);
+                worldLandmarks = toHandLandmarks(result.worldLandmarks?.[0]);
             }
 
-            let result: TasksHandLandmarkerResult;
-            try {
-                // ⚡ PERF: Utiliser le canvas basse résolution au lieu de la vidéo HD
-                result = landmarker.detectForVideo(inputSource, nowMs) as TasksHandLandmarkerResult;
-            } catch (err) {
-                console.warn("[MediaPipe] Detect error:", err);
-                return;
-            }
-
-            const handed = pickBestHandedness(result);
-            const lm = result.landmarks?.[0];
-            const wlm = result.worldLandmarks?.[0];
-
+            // Traitement commun des résultats
             let jewelryPos: JewelryPosition | null = null;
             let handResult: HandResult | null = null;
 
-            if (lm && lm.length >= 21) {
+            if (landmarks && landmarks.length >= 21) {
                 handResult = {
-                    handedness: handed.label,
-                    handedness_score: handed.score,
-                    landmarks: toHandLandmarks(lm),
-                    world_landmarks: toHandLandmarks(wlm ?? lm),
+                    handedness,
+                    handedness_score: handednessScore,
+                    landmarks,
+                    world_landmarks: worldLandmarks ?? landmarks,
                 };
 
                 jewelryPos = calculateJewelryTransform(
                     handResult.landmarks,
                     handResult.world_landmarks,
-                    handed.label as "Left" | "Right",
+                    handedness as "Left" | "Right",
                     video.clientWidth || video.videoWidth || 640,
                     video.clientHeight || video.videoHeight || 480
                 );
@@ -543,7 +753,7 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
                 success: !!handResult,
                 hand_result: handResult,
                 jewelry_position: jewelryPos,
-                confidence: handResult ? handed.score : 0,
+                confidence: handResult ? handednessScore : 0,
                 processing_time_ms: performance.now() - t0,
                 timestamp: Date.now(),
             };
