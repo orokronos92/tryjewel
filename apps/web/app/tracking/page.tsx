@@ -23,7 +23,7 @@ import { PerformanceDebugMini } from '@/components/performance-debug';
 import { usePerformanceStore, useTierConfig } from '@/stores/performance-store';
 import { getTierName } from '@/lib/adaptive-performance';
 import { CalibrationWizard } from '@/components/calibration-wizard';
-import { RingSizeIndicatorCompact, RingSizeSummary } from '@/components/ring-size-indicator';
+import { RingSizeSummary } from '@/components/ring-size-indicator';
 import { useCalibrationStore } from '@/stores/calibration-store';
 
 // =============================================================================
@@ -323,10 +323,6 @@ export default function TrackingPage() {
     // Si complète, le tracking continue
   }, [setIsCalibrating, stopTracking]);
 
-  // Récupérer les landmarks pour la calibration
-  const currentLandmarks = tracking.last_result?.hand_result?.landmarks ?? null;
-  const currentWorldLandmarks = tracking.last_result?.hand_result?.world_landmarks ?? null;
-
   // ==========================================================================
   // RENDER
   // ==========================================================================
@@ -379,8 +375,6 @@ export default function TrackingPage() {
                   containerWidth={videoDimensions?.width || 640}
                   containerHeight={videoDimensions?.height || 480}
                   videoElement={videoElement}
-                  landmarks={currentLandmarks}
-                  worldLandmarks={currentWorldLandmarks}
                 />
               )}
 
@@ -545,8 +539,6 @@ export default function TrackingPage() {
                   containerWidth={videoDimensions?.width || 640}
                   containerHeight={videoDimensions?.height || 480}
                   videoElement={videoElement}
-                  landmarks={currentLandmarks}
-                  worldLandmarks={currentWorldLandmarks}
                 />
               )}
 

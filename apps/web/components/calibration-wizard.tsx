@@ -1,14 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
     useCalibrationStore,
     CREDIT_CARD_WIDTH_MM,
     CREDIT_CARD_HEIGHT_MM,
-    ellipseCircumference,
-    circumferenceToRingSizes,
     HandMeasurements,
-    FingerMeasurement,
 } from "@/stores/calibration-store";
 import { Button } from "@/components/ui/button";
 import { CreditCard, Hand, Check, X, ChevronRight } from "lucide-react";
@@ -22,9 +19,6 @@ interface CalibrationWizardProps {
     containerWidth: number;
     containerHeight: number;
     videoElement: HTMLVideoElement | null;
-    // Landmarks MediaPipe (fournis par le parent quand disponibles)
-    landmarks: Array<{ x: number; y: number; z: number }> | null;
-    worldLandmarks: Array<{ x: number; y: number; z: number }> | null;
 }
 
 interface StepConfig {
@@ -70,46 +64,6 @@ const STEPS: StepConfig[] = [
     },
 ];
 
-// Indices des landmarks MediaPipe pour les doigts
-const FINGER_LANDMARKS = {
-    index: { mcp: 5, pip: 6, dip: 7, tip: 8 },
-    middle: { mcp: 9, pip: 10, dip: 11, tip: 12 },
-    ring: { mcp: 13, pip: 14, dip: 15, tip: 16 },
-    pinky: { mcp: 17, pip: 18, dip: 19, tip: 20 },
-};
-
-// Pour mesurer la largeur de la paume
-const PALM_LANDMARKS = {
-    indexMcp: 5,
-    pinkyMcp: 17,
-    wrist: 0,
-    middleMcp: 9,
-};
-
-// Connexions pour dessiner le squelette de la main
-const HAND_CONNECTIONS = [
-    // Pouce
-    [0, 1], [1, 2], [2, 3], [3, 4],
-    // Index
-    [0, 5], [5, 6], [6, 7], [7, 8],
-    // Majeur
-    [0, 9], [9, 10], [10, 11], [11, 12],
-    // Annulaire
-    [0, 13], [13, 14], [14, 15], [15, 16],
-    // Auriculaire
-    [0, 17], [17, 18], [18, 19], [19, 20],
-    // Paume
-    [5, 9], [9, 13], [13, 17],
-];
-
-// Ratios anatomiques pour la largeur des doigts par rapport à la largeur de la paume
-// Source: études anthropométriques moyennes
-const FINGER_WIDTH_RATIOS = {
-    index: 0.22,   // ~22% de la largeur paume
-    middle: 0.23,  // ~23% de la largeur paume (le plus large)
-    ring: 0.21,    // ~21% de la largeur paume
-    pinky: 0.18,   // ~18% de la largeur paume (le plus fin)
-};
 
 // =============================================================================
 // COMPONENT
@@ -120,13 +74,10 @@ export function CalibrationWizard({
     containerWidth,
     containerHeight,
     videoElement,
-    landmarks,
-    worldLandmarks,
 }: CalibrationWizardProps) {
     const {
         currentStep,
         setCurrentStep,
-        closeDistance,
         setCloseCardCalibration,
         setCloseHandMeasurements,
         setFarCardCalibration,
@@ -134,12 +85,9 @@ export function CalibrationWizard({
         completeCalibration,
     } = useCalibrationStore();
 
-    // État local
-    const [sliderValue, setSliderValue] = useState(50);
+    // État local pour les sliders de main
     const [handWidthSlider, setHandWidthSlider] = useState(50);
     const [handHeightSlider, setHandHeightSlider] = useState(50);
-    const [handDetected, setHandDetected] = useState(false);
-    const [calculatedMeasurements, setCalculatedMeasurements] = useState<HandMeasurements | null>(null);
 
     // ⚡ FIX: Toujours utiliser un index valide (0-3)
     // Si currentStep est 0 ou invalide, on force l'affichage de l'étape 1
@@ -157,156 +105,54 @@ export function CalibrationWizard({
         }
     }, [currentStep, setCurrentStep]);
 
-    // Conversion slider vers pixels pour la carte
-    const getCardWidthPx = (val: number) => {
-        const min = containerWidth * 0.15;
-        const max = containerWidth * 0.85;
-        return min + (val / 100) * (max - min);
-    };
-
     // Conversion slider vers pixels pour la main
     const getHandWidthPx = (val: number) => {
-        const min = containerWidth * 0.1;
-        const max = containerWidth * 0.7;
+        const min = containerWidth * 0.15;
+        const max = containerWidth * 0.5;
         return min + (val / 100) * (max - min);
     };
 
     const getHandHeightPx = (val: number) => {
-        const min = containerHeight * 0.15;
-        const max = containerHeight * 0.8;
+        const min = containerHeight * 0.25;
+        const max = containerHeight * 0.7;
         return min + (val / 100) * (max - min);
     };
-
-    const cardWidthPx = getCardWidthPx(sliderValue);
-    const cardAspectRatio = CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM;
-    const cardHeightPx = cardWidthPx / cardAspectRatio;
 
     const handWidthPx = getHandWidthPx(handWidthSlider);
     const handHeightPx = getHandHeightPx(handHeightSlider);
 
-    // Calcul automatique des mesures de doigt depuis landmarks
-    const calculateFingerMeasurements = useCallback(() => {
-        if (!landmarks || landmarks.length < 21 || !closeDistance) {
-            return null;
-        }
-
-        const pixelsPerMm = closeDistance.pixelsPerMm;
-        if (pixelsPerMm <= 0) return null;
-
-        const videoWidth = videoElement?.videoWidth || containerWidth;
-        const videoHeight = videoElement?.videoHeight || containerHeight;
-
-        // Fonction pour convertir landmark normalisé en pixels
-        const toPixels = (lm: { x: number; y: number; z: number }) => ({
-            x: lm.x * videoWidth,
-            y: lm.y * videoHeight,
-            z: lm.z,
-        });
-
-        // Calculer la largeur de la paume (INDEX_MCP à PINKY_MCP)
-        const indexMcp = toPixels(landmarks[PALM_LANDMARKS.indexMcp]);
-        const pinkyMcp = toPixels(landmarks[PALM_LANDMARKS.pinkyMcp]);
-        const palmWidthPx = Math.sqrt(
-            Math.pow(indexMcp.x - pinkyMcp.x, 2) + Math.pow(indexMcp.y - pinkyMcp.y, 2)
-        );
-        const palmWidthMm = palmWidthPx / pixelsPerMm;
-
-        // Calculer la hauteur de la main
-        const wrist = toPixels(landmarks[PALM_LANDMARKS.wrist]);
-        const middleTip = toPixels(landmarks[FINGER_LANDMARKS.middle.tip]);
-        const handTotalHeightPx = Math.sqrt(
-            Math.pow(wrist.x - middleTip.x, 2) + Math.pow(wrist.y - middleTip.y, 2)
-        );
-
-        // Fonction pour mesurer un doigt basée sur les ratios anatomiques
-        const measureFinger = (fingerName: keyof typeof FINGER_LANDMARKS): FingerMeasurement | null => {
-            // Utiliser le ratio anatomique pour calculer la largeur du doigt
-            const ratio = FINGER_WIDTH_RATIOS[fingerName];
-            const fingerWidthMm = palmWidthMm * ratio;
-            const fingerWidthPx = fingerWidthMm * pixelsPerMm;
-
-            // La profondeur est généralement 80-90% de la largeur (doigt légèrement ovale)
-            const depthMm = fingerWidthMm * 0.85;
-
-            // Calculer la circonférence (forme elliptique)
-            const circumference = ellipseCircumference(fingerWidthMm, depthMm);
-            const ringSizes = circumferenceToRingSizes(circumference);
-
-            return {
-                widthPx: fingerWidthPx,
-                widthMm: fingerWidthMm,
-                depthMm,
-                circumferenceMm: circumference,
-                ringSizes,
-            };
-        };
-
-        const measurements: HandMeasurements = {
-            handWidthPx: palmWidthPx,
-            handHeightPx: handTotalHeightPx,
-            index: measureFinger('index'),
-            middle: measureFinger('middle'),
-            ring: measureFinger('ring'),
-            pinky: measureFinger('pinky'),
-        };
-
-        console.log('[Calibration] 📏 Mesures calculées:', {
-            palmWidthMm: palmWidthMm.toFixed(1),
-            index: measurements.index?.circumferenceMm.toFixed(1),
-            middle: measurements.middle?.circumferenceMm.toFixed(1),
-            ring: measurements.ring?.circumferenceMm.toFixed(1),
-            pinky: measurements.pinky?.circumferenceMm.toFixed(1),
-        });
-
-        return measurements;
-    }, [landmarks, worldLandmarks, closeDistance, videoElement, containerWidth, containerHeight]);
-
-    // Effet pour détecter la main et calculer les mesures
-    useEffect(() => {
-        if (step?.type === 'hand' && landmarks && landmarks.length >= 21) {
-            setHandDetected(true);
-
-            // Calculer les mesures seulement si on a le pixelsPerMm
-            if (step.distance === 'close' && closeDistance?.pixelsPerMm) {
-                const measurements = calculateFingerMeasurements();
-                setCalculatedMeasurements(measurements);
-            }
-        } else {
-            setHandDetected(false);
-        }
-    }, [step, landmarks, closeDistance, calculateFingerMeasurements]);
-
     // Confirmer l'étape actuelle
     const handleConfirm = () => {
         if (step.type === 'card') {
-            // Sauvegarder la calibration carte
+            // Sauvegarder la calibration carte (taille FIXE)
+            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.35 : containerWidth * 0.18;
             if (step.distance === 'close') {
-                setCloseCardCalibration(cardWidthPx);
+                setCloseCardCalibration(fixedCardWidth);
             } else {
-                setFarCardCalibration(cardWidthPx);
+                setFarCardCalibration(fixedCardWidth);
             }
         } else {
-            // Sauvegarder les mesures de main
-            if (step.distance === 'close' && calculatedMeasurements) {
-                setCloseHandMeasurements(calculatedMeasurements);
-            } else if (step.distance === 'far') {
-                // Pour la distance loin, on recalcule avec le nouveau pixelsPerMm
-                // Pour l'instant on sauvegarde les dimensions du slider
-                setFarHandMeasurements({
-                    handWidthPx,
-                    handHeightPx,
-                    index: null,
-                    middle: null,
-                    ring: null,
-                    pinky: null,
-                });
+            // Sauvegarder les mesures de main (taille ajustée par l'utilisateur)
+            const handMeasurements: HandMeasurements = {
+                handWidthPx,
+                handHeightPx,
+                index: null,
+                middle: null,
+                ring: null,
+                pinky: null,
+            };
+
+            if (step.distance === 'close') {
+                setCloseHandMeasurements(handMeasurements);
+            } else {
+                setFarHandMeasurements(handMeasurements);
             }
         }
 
         // Passer à l'étape suivante ou terminer
         if (currentStep < 4) {
             setCurrentStep(currentStep + 1);
-            setSliderValue(50);
+            // Reset sliders pour la prochaine étape main
             setHandWidthSlider(50);
             setHandHeightSlider(50);
         } else {
@@ -349,16 +195,20 @@ export function CalibrationWizard({
         if (!step) return null;
 
         if (step.type === 'card') {
+            // Taille FIXE du cadre carte (pas de slider)
+            // À 30cm: ~337px, à 50cm: ~169px (environ 2x plus petit)
+            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.35 : containerWidth * 0.18;
+            const fixedCardHeight = fixedCardWidth / (CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM);
+
             return (
                 <div className="relative w-full h-full flex flex-col">
-                    {/* Zone centrale - cadre de la carte */}
+                    {/* Zone centrale - cadre de la carte FIXE */}
                     <div className="flex-1 flex items-center justify-center">
                         <div
                             className="border-2 border-blue-500 bg-blue-500/20 shadow-[0_0_30px_rgba(59,130,246,0.5)] relative rounded-lg"
                             style={{
-                                width: cardWidthPx,
-                                height: cardHeightPx,
-                                transition: 'width 0.1s, height 0.1s',
+                                width: fixedCardWidth,
+                                height: fixedCardHeight,
                             }}
                         >
                             {/* Coins décoratifs */}
@@ -377,77 +227,80 @@ export function CalibrationWizard({
                         </div>
                     </div>
 
-                    {/* Slider en bas */}
-                    <div className="bg-black/70 p-4 rounded-t-lg">
-                        <div className="max-w-md mx-auto space-y-2">
-                            <div className="flex justify-between text-xs text-gray-300">
-                                <span>Plus petit</span>
-                                <span className="text-blue-400 font-mono">{Math.round(cardWidthPx)}px</span>
-                                <span>Plus grand</span>
-                            </div>
-                            <input
-                                type="range"
-                                min="0"
-                                max="100"
-                                step="0.5"
-                                value={sliderValue}
-                                onChange={(e) => setSliderValue(Number(e.target.value))}
-                                className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                            />
-                        </div>
+                    {/* Instruction en bas (pas de slider) */}
+                    <div className="bg-black/70 p-4 rounded-t-lg text-center">
+                        <p className="text-gray-300">
+                            {step.distance === 'close'
+                                ? "Placez votre carte dans le cadre à ~30cm"
+                                : "Reculez à ~50cm et placez la carte dans le cadre"
+                            }
+                        </p>
                     </div>
                 </div>
             );
         }
 
-        // Type = hand - Contour ajustable pour calibrer la taille de la main
+        // Type = hand - Contour de MAIN ajustable (silhouette)
         return (
             <div className="relative w-full h-full flex flex-col">
-                {/* Zone centrale - contour de main ajustable */}
+                {/* Zone centrale - contour de main (silhouette SVG) */}
                 <div className="flex-1 flex items-center justify-center relative">
-                    {/* Contour de main (rectangle vert ajustable) */}
-                    <div
-                        className="border-2 border-green-500 bg-green-500/10 shadow-[0_0_30px_rgba(34,197,94,0.5)] relative rounded-lg"
-                        style={{
-                            width: handWidthPx,
-                            height: handHeightPx,
-                            transition: 'width 0.1s, height 0.1s',
-                        }}
+                    {/* SVG contour de main ajustable */}
+                    <svg
+                        width={handWidthPx}
+                        height={handHeightPx}
+                        viewBox="0 0 200 280"
+                        className="overflow-visible"
+                        style={{ transition: 'width 0.1s, height 0.1s' }}
                     >
-                        {/* Coins décoratifs */}
-                        <div className="absolute -top-1 -left-1 w-5 h-5 border-t-2 border-l-2 border-green-400 rounded-tl" />
-                        <div className="absolute -top-1 -right-1 w-5 h-5 border-t-2 border-r-2 border-green-400 rounded-tr" />
-                        <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-2 border-l-2 border-green-400 rounded-bl" />
-                        <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-2 border-r-2 border-green-400 rounded-br" />
+                        {/* Contour de main stylisé */}
+                        <path
+                            d="M100 10
+                               L100 70
+                               M70 15 L70 80
+                               M130 15 L130 80
+                               M160 35 L160 90
+                               M40 60 Q20 70 25 100 L45 110
+                               M40 110 L40 200 Q40 250 70 260 L130 260 Q160 250 160 200 L160 110
+                               M40 110 Q40 90 70 80 L130 80 Q160 90 160 110"
+                            fill="none"
+                            stroke="#22c55e"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                        />
+                        {/* Doigts */}
+                        <ellipse cx="70" cy="15" rx="12" ry="20" fill="none" stroke="#22c55e" strokeWidth="3" />
+                        <ellipse cx="100" cy="10" rx="12" ry="22" fill="none" stroke="#22c55e" strokeWidth="3" />
+                        <ellipse cx="130" cy="15" rx="12" ry="20" fill="none" stroke="#22c55e" strokeWidth="3" />
+                        <ellipse cx="160" cy="35" rx="10" ry="18" fill="none" stroke="#22c55e" strokeWidth="3" />
+                        {/* Pouce */}
+                        <ellipse cx="30" cy="85" rx="15" ry="25" fill="none" stroke="#22c55e" strokeWidth="3" transform="rotate(-30, 30, 85)" />
+                        {/* Paume */}
+                        <ellipse cx="100" cy="180" rx="60" ry="70" fill="none" stroke="#22c55e" strokeWidth="3" strokeDasharray="8 4" />
+                    </svg>
 
-                        {/* Icône main au centre */}
-                        <div className="absolute inset-0 flex items-center justify-center">
-                            <Hand className="w-16 h-16 text-green-500/30" />
-                        </div>
-
-                        {/* Labels dimensions */}
-                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
-                            {Math.round(handWidthPx)}px
-                        </div>
-                        <div className="absolute top-1/2 -right-14 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
-                            {Math.round(handHeightPx)}px
-                        </div>
+                    {/* Labels dimensions */}
+                    <div className="absolute top-1/2 -right-4 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                        {Math.round(handHeightPx)}px
                     </div>
-
-                    {/* Instruction */}
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-green-600/90 text-white text-sm px-4 py-2 rounded-full shadow-lg">
-                        🖐️ Placez votre main dans le cadre
+                    <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                        {Math.round(handWidthPx)}px
                     </div>
                 </div>
 
                 {/* Sliders en bas */}
                 <div className="bg-black/70 p-4 rounded-t-lg space-y-3">
+                    <p className="text-center text-gray-300 text-sm mb-2">
+                        Ajustez le contour pour qu'il corresponde à votre main
+                    </p>
+
                     {/* Slider Largeur */}
                     <div className="max-w-md mx-auto space-y-1">
                         <div className="flex justify-between text-xs text-gray-300">
-                            <span>Étroit</span>
-                            <span className="text-green-400 font-mono">Largeur: {Math.round(handWidthPx)}px</span>
-                            <span>Large</span>
+                            <span>Fine</span>
+                            <span className="text-green-400 font-mono">Largeur</span>
+                            <span>Épaisse</span>
                         </div>
                         <input
                             type="range"
@@ -463,9 +316,9 @@ export function CalibrationWizard({
                     {/* Slider Hauteur */}
                     <div className="max-w-md mx-auto space-y-1">
                         <div className="flex justify-between text-xs text-gray-300">
-                            <span>Court</span>
-                            <span className="text-green-400 font-mono">Hauteur: {Math.round(handHeightPx)}px</span>
-                            <span>Grand</span>
+                            <span>Courte</span>
+                            <span className="text-green-400 font-mono">Hauteur</span>
+                            <span>Longue</span>
                         </div>
                         <input
                             type="range"
