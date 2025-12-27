@@ -319,16 +319,16 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             });
 
             ringRef.current?.add(model);
-
-            // Debug Axes Ring - ajouté à la SCENE (pas au ring) pour pouvoir le cacher
-            const axesHelper = createThickAxesHelper(1, 0.016);
-            axesHelper.scale.setScalar(0.5);
-            axesHelper.visible = false; // Hidden by default until tracking
-            scene.add(axesHelper);
-            ringAxesRef.current = axesHelper;
-
             console.log('[GLB Load] 🎉 Ring loaded and centered');
         });
+
+        // ⚡ FIX: Créer les axes EN DEHORS du callback async pour éviter les problèmes en dev mode
+        // Debug Axes Ring - ajouté à la SCENE (pas au ring) pour pouvoir le cacher
+        const ringAxes = createThickAxesHelper(1, 0.016);
+        ringAxes.scale.setScalar(0.5);
+        ringAxes.visible = false; // Hidden by default until tracking
+        scene.add(ringAxes);
+        ringAxesRef.current = ringAxes;
 
         // Debug Axes Bone (Phalange)
         const boneAxes = createThickAxesHelper(1, 0.016); // Same style
@@ -695,6 +695,12 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
 
             occludersRef.current.clear();
             bonesDataRef.current.clear();
+
+            // ⚡ FIX DEV MODE: Reset refs pour éviter les problèmes avec StrictMode
+            ringAxesRef.current = null;
+            boneAxesRef.current = null;
+            ringRef.current = null;
+            rendererRef.current = null;
         };
     }, [videoWidth, videoHeight]);
 

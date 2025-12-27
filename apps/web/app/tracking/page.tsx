@@ -286,7 +286,9 @@ export default function TrackingPage() {
 
   const handleCalibrateAndStart = useCallback(() => {
     if (!isCalibrated) {
-      // Lancer la calibration d'abord
+      // Lancer le tracking ET la calibration en même temps
+      // (on a besoin des landmarks MediaPipe pour la calibration)
+      startTracking();
       setIsCalibrating(true);
     } else {
       // Déjà calibré, démarrer directement
@@ -296,11 +298,12 @@ export default function TrackingPage() {
 
   const handleCalibrationClose = useCallback(() => {
     setIsCalibrating(false);
-    // Si la calibration est complète, démarrer le tracking
-    if (useCalibrationStore.getState().isCalibrated) {
-      startTracking();
+    // Si la calibration n'est PAS complète, arrêter le tracking
+    if (!useCalibrationStore.getState().isCalibrated) {
+      stopTracking();
     }
-  }, [setIsCalibrating, startTracking]);
+    // Si complète, le tracking continue
+  }, [setIsCalibrating, stopTracking]);
 
   // Récupérer les landmarks pour la calibration
   const currentLandmarks = tracking.last_result?.hand_result?.landmarks ?? null;
