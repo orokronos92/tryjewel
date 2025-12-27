@@ -307,60 +307,60 @@ export function CalibrationWizard({
             );
         }
 
-        // Type = hand - Contour de MAIN ajustable (silhouette propre)
+        // Type = hand - Contour de MAIN ajustable (vraie silhouette)
         return (
             <div className="relative w-full h-full flex flex-col">
-                {/* Zone centrale - contour de main (silhouette SVG propre) */}
-                <div className="flex-1 flex items-center justify-center relative">
-                    {/* SVG silhouette de main - contour simple et propre */}
-                    {/* preserveAspectRatio="none" permet de déformer largeur/hauteur indépendamment */}
-                    <svg
-                        width={handWidthPx}
-                        height={handHeightPx}
-                        viewBox="0 0 100 140"
-                        preserveAspectRatio="none"
-                        className="overflow-visible"
-                        style={{ transition: 'width 0.1s, height 0.1s' }}
+                {/* Zone centrale - contour de main avec dimensions FIXES (pas flex) */}
+                <div className="flex-1 flex items-center justify-center relative overflow-hidden">
+                    {/* Conteneur à taille fixe pour le SVG */}
+                    <div
+                        style={{
+                            width: handWidthPx,
+                            height: handHeightPx,
+                            transition: 'width 0.1s, height 0.1s'
+                        }}
+                        className="relative"
                     >
-                        {/* Silhouette de main - contour unique */}
-                        <path
-                            d="M50 5
-                               C53 5 55 3 55 8 L55 45
-                               C55 48 58 50 60 50
-                               L65 50 C68 50 70 48 70 45 L70 15
-                               C70 10 72 8 75 8 C78 8 80 10 80 15 L80 50
-                               C80 53 82 55 85 55
-                               L85 25 C85 20 87 18 90 18 C93 18 95 20 95 25 L95 70
-                               C95 100 80 120 50 135
-                               C20 120 5 100 5 70 L5 55
-                               C5 50 7 48 10 48 C13 48 15 50 15 55 L15 65
-                               C15 68 18 70 20 68 L20 45
-                               C20 40 22 38 25 38 C28 38 30 40 30 45 L30 50
-                               C30 53 33 55 35 55
-                               L40 55 C43 55 45 53 45 50 L45 8
-                               C45 3 47 5 50 5 Z"
-                            fill="rgba(34, 197, 94, 0.15)"
-                            stroke="#22c55e"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                        />
-                        {/* Lignes indicatrices pour les doigts (où mesurer) */}
-                        <line x1="45" y1="50" x2="55" y2="50" stroke="#22c55e" strokeWidth="1" strokeDasharray="2 2" opacity="0.7" />
-                        <line x1="60" y1="50" x2="70" y2="50" stroke="#22c55e" strokeWidth="1" strokeDasharray="2 2" opacity="0.7" />
-                        <line x1="75" y1="55" x2="85" y2="55" stroke="#22c55e" strokeWidth="1" strokeDasharray="2 2" opacity="0.7" />
-                    </svg>
+                        {/* SVG silhouette de main - vraie forme de main */}
+                        <svg
+                            width="100%"
+                            height="100%"
+                            viewBox="0 0 120 160"
+                            preserveAspectRatio="none"
+                            className="overflow-visible"
+                        >
+                            {/* Vraie silhouette de main ouverte */}
+                            <path
+                                d="M60 2
+                                   C64 2 67 5 67 10 L67 50
+                                   L73 50 L73 8 C73 3 76 0 81 0 C86 0 89 3 89 8 L89 52
+                                   L95 52 L95 18 C95 13 98 10 103 10 C108 10 111 13 111 18 L111 70
+                                   C111 72 112 74 114 74 L114 35 C114 30 117 27 120 30 L120 85
+                                   C120 120 100 145 60 158
+                                   C20 145 0 120 0 85 L0 65
+                                   C0 60 3 57 8 60 L8 75 C8 78 10 80 12 78 L12 52
+                                   C12 47 15 44 20 44 C25 44 28 47 28 52 L28 50
+                                   L34 50 L34 10 C34 5 37 2 42 2 C47 2 50 5 50 10 L50 50
+                                   L54 50 L54 10 C54 5 56 2 60 2 Z"
+                                fill="rgba(34, 197, 94, 0.2)"
+                                stroke="#22c55e"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            />
+                        </svg>
+                    </div>
 
-                    {/* Labels dimensions en mm (calculées avec le pixelsPerMm de la distance actuelle) */}
+                    {/* Labels dimensions en mm */}
                     {(() => {
                         const ppm = step.distance === 'close' ? closeDistance?.pixelsPerMm : farDistance?.pixelsPerMm;
                         if (!ppm) return null;
                         return (
                             <>
-                                <div className="absolute top-1/2 -right-16 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                                <div className="absolute top-1/2 right-4 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
                                     {Math.round(handHeightPx / ppm)} mm
                                 </div>
-                                <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
                                     {Math.round(handWidthPx / ppm)} mm
                                 </div>
                             </>
@@ -378,14 +378,14 @@ export function CalibrationWizard({
                     <div className="max-w-md mx-auto space-y-1">
                         <div className="flex justify-between text-xs text-gray-300">
                             <span>Fine</span>
-                            <span className="text-green-400 font-mono">Largeur</span>
+                            <span className="text-green-400 font-mono">Largeur: {Math.round(handWidthPx)}px</span>
                             <span>Épaisse</span>
                         </div>
                         <input
                             type="range"
                             min="0"
                             max="100"
-                            step="0.5"
+                            step="1"
                             value={handWidthSlider}
                             onChange={(e) => setHandWidthSlider(Number(e.target.value))}
                             className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
@@ -396,14 +396,14 @@ export function CalibrationWizard({
                     <div className="max-w-md mx-auto space-y-1">
                         <div className="flex justify-between text-xs text-gray-300">
                             <span>Courte</span>
-                            <span className="text-green-400 font-mono">Hauteur</span>
+                            <span className="text-green-400 font-mono">Hauteur: {Math.round(handHeightPx)}px</span>
                             <span>Longue</span>
                         </div>
                         <input
                             type="range"
                             min="0"
                             max="100"
-                            step="0.5"
+                            step="1"
                             value={handHeightSlider}
                             onChange={(e) => setHandHeightSlider(Number(e.target.value))}
                             className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
