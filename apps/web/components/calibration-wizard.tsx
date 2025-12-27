@@ -140,16 +140,26 @@ export function CalibrationWizard({
         }
     }, [currentStep, setCurrentStep]);
 
-    // Conversion slider vers pixels pour la main
+    // ⚡ FIX: Ajuster la taille initiale selon la distance
+    // À 50cm la main paraît ~2x plus petite qu'à 30cm
+    const distanceScale = step.distance === 'close' ? 1.0 : 0.5;
+
+    // Conversion slider vers pixels pour la main (avec facteur de distance)
     const getHandWidthPx = (val: number) => {
-        const min = containerWidth * 0.15;
-        const max = containerWidth * 0.5;
+        const baseMin = containerWidth * 0.15;
+        const baseMax = containerWidth * 0.5;
+        // Appliquer le facteur de distance
+        const min = baseMin * distanceScale;
+        const max = baseMax * distanceScale;
         return min + (val / 100) * (max - min);
     };
 
     const getHandHeightPx = (val: number) => {
-        const min = containerHeight * 0.25;
-        const max = containerHeight * 0.7;
+        const baseMin = containerHeight * 0.25;
+        const baseMax = containerHeight * 0.7;
+        // Appliquer le facteur de distance
+        const min = baseMin * distanceScale;
+        const max = baseMax * distanceScale;
         return min + (val / 100) * (max - min);
     };
 
@@ -303,10 +313,12 @@ export function CalibrationWizard({
                 {/* Zone centrale - contour de main (silhouette SVG propre) */}
                 <div className="flex-1 flex items-center justify-center relative">
                     {/* SVG silhouette de main - contour simple et propre */}
+                    {/* preserveAspectRatio="none" permet de déformer largeur/hauteur indépendamment */}
                     <svg
                         width={handWidthPx}
                         height={handHeightPx}
                         viewBox="0 0 100 140"
+                        preserveAspectRatio="none"
                         className="overflow-visible"
                         style={{ transition: 'width 0.1s, height 0.1s' }}
                     >
