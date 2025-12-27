@@ -161,7 +161,9 @@ async function getHandLandmarkerSingleton(options: {
             },
             runningMode: "VIDEO",
             numHands: options.numHands,
-            modelComplexity: options.modelComplexity ?? 1, // ⚡ Utilise le niveau demandé (0 = Lite, 1 = Full)
+            // ⚡ PERF: Default to Lite model (0) for better mobile performance
+            // Full model (1) gives ~10% better accuracy but 2x slower
+            modelComplexity: options.modelComplexity ?? 0,
             minHandDetectionConfidence: options.minDetectionConfidence,
             minHandPresenceConfidence: options.minTrackingConfidence,
             minTrackingConfidence: options.minTrackingConfidence,
@@ -534,8 +536,17 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
         if (!isTracking) return;
 
         let raf = 0;
-        const loop = async () => {
-            await processFrame();
+        let isProcessing = false;  // ⚡ PERF: Prevent overlapping frames
+
+        const loop = () => {
+            // ⚡ PERF: Don't await - let detection run async while RAF continues
+            // This prevents detection time from blocking the render loop
+            if (!isProcessing) {
+                isProcessing = true;
+                processFrame().finally(() => {
+                    isProcessing = false;
+                });
+            }
             raf = requestAnimationFrame(loop);
         };
 
