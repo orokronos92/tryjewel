@@ -129,11 +129,15 @@ export default function TrackingPage() {
     resetCalibration,
   } = useCalibrationStore();
 
-  // ⚡ Reset calibration au démarrage de la session
+  // ⚡ Reset calibration au démarrage de la session (une seule fois)
+  const hasResetRef = useRef(false);
   useEffect(() => {
-    resetCalibration();
-    console.log('[Tracking] 🔄 Calibration reset pour nouvelle session');
-  }, [resetCalibration]);
+    if (!hasResetRef.current) {
+      hasResetRef.current = true;
+      resetCalibration();
+      console.log('[Tracking] 🔄 Calibration reset pour nouvelle session');
+    }
+  }, []);
 
   // ⚡ PERFORMANCE ADAPTATIF - Récupérer la config du tier actuel
   const tierConfig = useTierConfig();
@@ -291,20 +295,25 @@ export default function TrackingPage() {
   // CALIBRATION
   // ==========================================================================
 
-  const handleCalibrateAndStart = useCallback(() => {
-    console.log('[Tracking] 🚀 handleCalibrateAndStart called, isCalibrated:', isCalibrated);
+  const handleButtonClick = useCallback(() => {
+    const calibStore = useCalibrationStore.getState();
+    console.log('[Tracking] 🚀 Button clicked, state:', {
+      isCalibrated: calibStore.isCalibrated,
+      isCalibrating: calibStore.isCalibrating,
+      currentStep: calibStore.currentStep,
+    });
 
-    // Toujours lancer la calibration d'abord si pas calibré
-    if (!isCalibrated) {
-      console.log('[Tracking] 📐 Lancement calibration...');
-      setIsCalibrating(true);
-      // Démarrer le tracking pour avoir les landmarks
-      startTracking();
+    if (!calibStore.isCalibrated) {
+      // Lancer la calibration
+      console.log('[Tracking] 📐 Lancement calibration wizard...');
+      useCalibrationStore.getState().setIsCalibrating(true);
+      startTracking(); // Pour avoir les landmarks MediaPipe
     } else {
-      console.log('[Tracking] ✅ Déjà calibré, démarrage tracking...');
+      // Calibré -> lancer le tracking
+      console.log('[Tracking] ✅ Calibré, démarrage essayage...');
       startTracking();
     }
-  }, [isCalibrated, setIsCalibrating, startTracking]);
+  }, [startTracking]);
 
   const handleCalibrationClose = useCallback(() => {
     setIsCalibrating(false);
@@ -484,7 +493,7 @@ export default function TrackingPage() {
                 {/* Bouton */}
                 <div className="pt-3 sm:pt-4 border-t">
                   <Button
-                    onClick={isTracking ? stopTracking : handleCalibrateAndStart}
+                    onClick={isTracking ? stopTracking : handleButtonClick}
                     disabled={!camera.isActive || !isInitialized || !videoElement}
                     variant={isTracking ? "destructive" : "default"}
                     className="w-full text-sm"
@@ -492,7 +501,7 @@ export default function TrackingPage() {
                     {isTracking ? (
                       "⏹️ Arrêter"
                     ) : isCalibrated ? (
-                      "🚀 Démarrer"
+                      "🎯 Commencer l'essayage"
                     ) : (
                       <>
                         <Sparkles className="w-4 h-4 mr-1" />
