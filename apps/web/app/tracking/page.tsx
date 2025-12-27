@@ -126,7 +126,14 @@ export default function TrackingPage() {
     isCalibrated,
     setIsCalibrating,
     currentStep,
+    resetCalibration,
   } = useCalibrationStore();
+
+  // ⚡ Reset calibration au démarrage de la session
+  useEffect(() => {
+    resetCalibration();
+    console.log('[Tracking] 🔄 Calibration reset pour nouvelle session');
+  }, [resetCalibration]);
 
   // ⚡ PERFORMANCE ADAPTATIF - Récupérer la config du tier actuel
   const tierConfig = useTierConfig();
@@ -285,13 +292,16 @@ export default function TrackingPage() {
   // ==========================================================================
 
   const handleCalibrateAndStart = useCallback(() => {
+    console.log('[Tracking] 🚀 handleCalibrateAndStart called, isCalibrated:', isCalibrated);
+
+    // Toujours lancer la calibration d'abord si pas calibré
     if (!isCalibrated) {
-      // Lancer le tracking ET la calibration en même temps
-      // (on a besoin des landmarks MediaPipe pour la calibration)
-      startTracking();
+      console.log('[Tracking] 📐 Lancement calibration...');
       setIsCalibrating(true);
+      // Démarrer le tracking pour avoir les landmarks
+      startTracking();
     } else {
-      // Déjà calibré, démarrer directement
+      console.log('[Tracking] ✅ Déjà calibré, démarrage tracking...');
       startTracking();
     }
   }, [isCalibrated, setIsCalibrating, startTracking]);
@@ -355,11 +365,11 @@ export default function TrackingPage() {
               )}
 
               {/* Wizard de calibration */}
-              {isCalibrating && videoDimensions && (
+              {isCalibrating && (
                 <CalibrationWizard
                   onClose={handleCalibrationClose}
-                  containerWidth={videoDimensions.width}
-                  containerHeight={videoDimensions.height}
+                  containerWidth={videoDimensions?.width || 640}
+                  containerHeight={videoDimensions?.height || 480}
                   videoElement={videoElement}
                   landmarks={currentLandmarks}
                   worldLandmarks={currentWorldLandmarks}
@@ -521,11 +531,11 @@ export default function TrackingPage() {
               )}
 
               {/* Wizard de calibration */}
-              {isCalibrating && videoDimensions && (
+              {isCalibrating && (
                 <CalibrationWizard
                   onClose={handleCalibrationClose}
-                  containerWidth={videoDimensions.width}
-                  containerHeight={videoDimensions.height}
+                  containerWidth={videoDimensions?.width || 640}
+                  containerHeight={videoDimensions?.height || 480}
                   videoElement={videoElement}
                   landmarks={currentLandmarks}
                   worldLandmarks={currentWorldLandmarks}
