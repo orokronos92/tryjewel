@@ -20,6 +20,8 @@ import { Badge } from "@/components/ui/badge";
 import { Activity, Smartphone } from "lucide-react";
 import { ARAdjustmentControls } from "@/components/ar-adjustment-controls";
 import { PerformanceDebugMini } from '@/components/performance-debug';
+import { usePerformanceStore, useTierConfig } from '@/stores/performance-store';
+import { getTierName } from '@/lib/adaptive-performance';
 
 // =============================================================================
 // IMPORTS DYNAMIQUES (SSR disabled)
@@ -117,6 +119,10 @@ export default function TrackingPage() {
   const { tracking, updateTrackingResult, setTracking, updateFPS } = useEdgeTrackingStore();
   const { selected } = useJewelryStore();
 
+  // ⚡ PERFORMANCE ADAPTATIF - Récupérer la config du tier actuel
+  const tierConfig = useTierConfig();
+  const { initialize: initPerformance, currentTier, recordFrame, checkAndAdapt } = usePerformanceStore();
+
   // Détection mobile
   const isMobile = useMemo(() => {
     if (typeof window === 'undefined') return false;
@@ -159,6 +165,15 @@ export default function TrackingPage() {
   }, [isMobile]);
 
   // ==========================================================================
+  // ⚡ PERFORMANCE ADAPTATIF - Initialisation au démarrage
+  // ==========================================================================
+
+  useEffect(() => {
+    initPerformance();
+    console.log('[TrackingPage] 🎯 Performance system initialized, tier:', currentTier, getTierName(currentTier));
+  }, [initPerformance]);
+
+  // ==========================================================================
   // EDGE AR TRACKING
   // ==========================================================================
 
@@ -174,11 +189,15 @@ export default function TrackingPage() {
     jewelryType: selected.jewelry_type || 'ring',
     finger: selected.finger || 'index',
     hand: selected.hand || 'right',
-    frameSkip: 1,  // ⚡ Traiter chaque frame pour max FPS
-    modelComplexity: 0,  // ⚡ Forcer Lite model
-    // ⚡ FIX: Passer les dimensions affichées pour que la bague s'aligne avec le squelette visuel
+    // ⚡ PERFORMANCE ADAPTATIF - Utiliser les configs du tier détecté
+    frameSkip: tierConfig.frameSkip,
+    modelComplexity: tierConfig.modelComplexity,
+    minDetectionConfidence: tierConfig.minDetectionConfidence,
+    minTrackingConfidence: tierConfig.minTrackingConfidence,
     onResult: (result) => {
       updateTrackingResult(result);
+      // ⚡ Enregistrer la frame pour les métriques de performance
+      recordFrame();
     }
   });
 
@@ -191,6 +210,17 @@ export default function TrackingPage() {
   useEffect(() => {
     setTracking(isTracking);
   }, [isTracking, setTracking]);
+
+  // ⚡ ADAPTATION AUTOMATIQUE - Vérifier toutes les 2 secondes
+  useEffect(() => {
+    if (!isTracking) return;
+
+    const interval = setInterval(() => {
+      checkAndAdapt();
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isTracking, checkAndAdapt]);
 
   // Set video element when ready
   useEffect(() => {
@@ -290,6 +320,7 @@ export default function TrackingPage() {
               {isTracking && camera.isActive && (
                 <div className="absolute top-16 left-2 bg-black/60 text-white px-2 py-1 rounded text-xs z-20">
                   {tracking.last_result?.success ? "✅" : "🔍"} {fps.toFixed(0)} FPS
+                  <span className="ml-2 opacity-70">T{currentTier}</span>
                 </div>
               )}
 
@@ -333,6 +364,32 @@ export default function TrackingPage() {
                     {isTracking ? "🎯 Actif" : "⏸ Inactif"}
                   </Badge>
                 </div>
+
+                {/* ⚡ Performance Tier */}
+                <div className="flex justify-between">
+                  <span>Performance:</span>
+                  <Badge
+                    variant="outline"
+                    className={`text-xs ${
+                      currentTier === 0 ? 'bg-red-500/10 text-red-500' :
+                      currentTier === 1 ? 'bg-orange-500/10 text-orange-500' :
+                      currentTier === 2 ? 'bg-blue-500/10 text-blue-500' :
+                      'bg-green-500/10 text-green-500'
+                    }`}
+                  >
+                    T{currentTier} {getTierName(currentTier)}
+                  </Badge>
+                </div>
+
+                {/* ⚡ Config actuelle */}
+                {isTracking && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Config:</span>
+                    <span className="text-xs">
+                      Skip:{tierConfig.frameSkip} • Model:{tierConfig.modelComplexity === 0 ? 'Lite' : 'Full'}
+                    </span>
+                  </div>
+                )}
 
                 {/* Stats */}
                 {isTracking && fps > 0 && (
@@ -405,6 +462,9 @@ export default function TrackingPage() {
                   </div>
                   <div className="text-xs text-blue-400 mt-1">
                     ⚡ {fps.toFixed(0)} FPS • {averageProcessingTime.toFixed(0)}ms
+                  </div>
+                  <div className="text-xs text-yellow-400 mt-1">
+                    📊 T{currentTier} {getTierName(currentTier)} • Skip:{tierConfig.frameSkip}
                   </div>
                 </div>
               )}
