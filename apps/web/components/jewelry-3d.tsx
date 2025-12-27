@@ -322,20 +322,22 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             console.log('[GLB Load] 🎉 Ring loaded and centered');
         });
 
-        // ⚡ FIX: Créer les axes EN DEHORS du callback async pour éviter les problèmes en dev mode
+        // ⚡ FIX DEV MODE: Créer les axes EN DEHORS du callback async
         // Debug Axes Ring - ajouté à la SCENE (pas au ring) pour pouvoir le cacher
         const ringAxes = createThickAxesHelper(1, 0.016);
         ringAxes.scale.setScalar(0.5);
-        ringAxes.visible = false; // Hidden by default until tracking
+        ringAxes.visible = showRingAxesRef.current; // ⚡ Utiliser l'état actuel
         scene.add(ringAxes);
         ringAxesRef.current = ringAxes;
+        console.log('[3D] 🎯 Ring axes créés, visible:', ringAxes.visible);
 
         // Debug Axes Bone (Phalange)
-        const boneAxes = createThickAxesHelper(1, 0.016); // Same style
+        const boneAxes = createThickAxesHelper(1, 0.016);
         boneAxes.scale.setScalar(0.5);
-        boneAxes.visible = false; // Hidden by default until tracking
+        boneAxes.visible = showSkeletonRef.current; // ⚡ Utiliser l'état actuel
         scene.add(boneAxes);
         boneAxesRef.current = boneAxes;
+        console.log('[3D] 🦴 Bone axes créés, visible:', boneAxes.visible);
 
         const storeCache = {
             tracking: useEdgeTrackingStore.getState().tracking,
@@ -366,9 +368,15 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             const result = storeCache.tracking?.last_result;
             if (!result || !result.success || !result.hand_result?.landmarks) {
                 if (ringRef.current) ringRef.current.visible = false;
-                // ⚡ FIX: Cacher aussi les axes quand pas de tracking
-                if (ringAxesRef.current) ringAxesRef.current.visible = false;
-                if (boneAxesRef.current) boneAxesRef.current.visible = false;
+                // ⚡ FIX DEV MODE: Afficher les axes au centre pour debug même sans tracking
+                if (ringAxesRef.current) {
+                    ringAxesRef.current.visible = showRingAxesRef.current;
+                    ringAxesRef.current.position.set(0, 0, 0);
+                }
+                if (boneAxesRef.current) {
+                    boneAxesRef.current.visible = showSkeletonRef.current;
+                    boneAxesRef.current.position.set(0.1, 0, 0); // Décalé pour différencier
+                }
                 renderer.render(scene, camera);
                 return;
             }
