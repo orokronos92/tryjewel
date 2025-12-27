@@ -106,6 +106,10 @@ const PINKY_MCP = 17;
 const FILTER_MIN_CUTOFF = 10.0;
 const FILTER_BETA = 20.0;
 
+// ⚡ PERF: Résolution réduite pour MediaPipe (landmarks sont normalisés 0-1, pas besoin de haute résolution)
+const MEDIAPIPE_INPUT_WIDTH = 320;
+const MEDIAPIPE_INPUT_HEIGHT = 240;
+
 // =============================================================================
 // SINGLETON / MUTEX (avoid multi instances)
 // =============================================================================
@@ -261,6 +265,10 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
     const palmFacingRef = useRef<boolean | null>(null); // hysteresis
     const lastLogRef = useRef(0);
 
+    // ⚡ PERF: Canvas offscreen pour réduire la résolution envoyée à MediaPipe
+    const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const offscreenCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+
     useEffect(() => {
         videoElementRef.current = videoElement;
     }, [videoElement]);
@@ -276,6 +284,24 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
     useEffect(() => {
         frameSkipRef.current = frameSkip;
     }, [frameSkip]);
+
+    // ⚡ PERF: Initialiser le canvas offscreen pour la réduction de résolution
+    useEffect(() => {
+        const canvas = document.createElement('canvas');
+        canvas.width = MEDIAPIPE_INPUT_WIDTH;
+        canvas.height = MEDIAPIPE_INPUT_HEIGHT;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+        offscreenCanvasRef.current = canvas;
+        offscreenCtxRef.current = ctx;
+
+        console.log(`[MediaPipe] 📐 Offscreen canvas créé: ${MEDIAPIPE_INPUT_WIDTH}x${MEDIAPIPE_INPUT_HEIGHT}`);
+
+        return () => {
+            offscreenCanvasRef.current = null;
+            offscreenCtxRef.current = null;
+        };
+    }, []);
 
     // init landmarker
     useEffect(() => {
@@ -468,12 +494,22 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
 
             if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) return;
 
-            // Rear camera is not mirrored; front may be mirrored via CSS, but input to MP stays as video element.
-            const _facing = useCameraStore.getState().camera.facingMode;
+            // ⚡ PERF: Dessiner la vidéo sur le canvas offscreen en basse résolution
+            const offscreenCanvas = offscreenCanvasRef.current;
+            const offscreenCtx = offscreenCtxRef.current;
+
+            let inputSource: HTMLVideoElement | HTMLCanvasElement = video;
+
+            if (offscreenCanvas && offscreenCtx) {
+                // Dessiner la frame vidéo redimensionnée sur le canvas offscreen
+                offscreenCtx.drawImage(video, 0, 0, MEDIAPIPE_INPUT_WIDTH, MEDIAPIPE_INPUT_HEIGHT);
+                inputSource = offscreenCanvas;
+            }
 
             let result: TasksHandLandmarkerResult;
             try {
-                result = landmarker.detectForVideo(video, nowMs) as TasksHandLandmarkerResult;
+                // ⚡ PERF: Utiliser le canvas basse résolution au lieu de la vidéo HD
+                result = landmarker.detectForVideo(inputSource, nowMs) as TasksHandLandmarkerResult;
             } catch (err) {
                 console.warn("[MediaPipe] Detect error:", err);
                 return;
