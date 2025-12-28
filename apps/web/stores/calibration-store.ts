@@ -208,22 +208,57 @@ export const useCalibrationStore = create<CalibrationState>()(
             completeCalibration: () => {
                 const { closeDistance, farDistance } = get();
 
-                // Utiliser les mesures proches comme référence principale
-                // (plus précises car plus grande dans l'image)
                 const closeMeasurements = closeDistance?.handMeasurements;
+                const farMeasurements = farDistance?.handMeasurements;
 
-                if (!closeMeasurements) {
+                if (!closeMeasurements && !farMeasurements) {
                     console.warn('[Calibration] Pas de mesures de main disponibles');
                     return;
                 }
 
+                // Fonction helper pour moyenner les tailles de bagues
+                const averageRingSizes = (
+                    close: RingSizes | null | undefined,
+                    far: RingSizes | null | undefined
+                ): RingSizes | null => {
+                    if (!close && !far) return null;
+                    if (!close) return far!;
+                    if (!far) return close;
+
+                    // Moyenne des deux mesures
+                    const avgCircumference = (close.circumferenceMm + far.circumferenceMm) / 2;
+                    return circumferenceToRingSizes(avgCircumference);
+                };
+
+                // Calculer les tailles finales en moyennant 20cm et 40cm
+                const finalSizes = {
+                    index: averageRingSizes(closeMeasurements?.index?.ringSizes, farMeasurements?.index?.ringSizes),
+                    middle: averageRingSizes(closeMeasurements?.middle?.ringSizes, farMeasurements?.middle?.ringSizes),
+                    ring: averageRingSizes(closeMeasurements?.ring?.ringSizes, farMeasurements?.ring?.ringSizes),
+                    pinky: averageRingSizes(closeMeasurements?.pinky?.ringSizes, farMeasurements?.pinky?.ringSizes),
+                };
+
+                // Log de comparaison des deux mesures
+                console.log('═══════════════════════════════════════════════════════════');
+                console.log('[Calibration] 📊 COMPARAISON 20cm vs 40cm:');
+                console.log('═══════════════════════════════════════════════════════════');
+
+                const fingers = ['index', 'middle', 'ring', 'pinky'] as const;
+                fingers.forEach(finger => {
+                    const closeSize = closeMeasurements?.[finger]?.ringSizes.eu ?? 'N/A';
+                    const farSize = farMeasurements?.[finger]?.ringSizes.eu ?? 'N/A';
+                    const finalSize = finalSizes[finger]?.eu ?? 'N/A';
+                    const diff = (typeof closeSize === 'number' && typeof farSize === 'number')
+                        ? Math.abs(closeSize - farSize)
+                        : 'N/A';
+
+                    console.log(`[Calibration] ${finger}: 20cm=${closeSize} EU | 40cm=${farSize} EU | Δ=${diff} | Final=${finalSize} EU`);
+                });
+
                 // Calculer le facteur d'échelle pour le squelette
-                // basé sur le ratio entre les deux distances
                 let scaleFactor = 1.0;
                 if (closeDistance && farDistance && farDistance.cardWidthPx > 0) {
-                    // Ratio entre les deux distances
                     const distanceRatio = closeDistance.cardWidthPx / farDistance.cardWidthPx;
-                    // Le facteur d'échelle sera utilisé pour ajuster le squelette
                     scaleFactor = distanceRatio;
                 }
 
@@ -235,8 +270,6 @@ export const useCalibrationStore = create<CalibrationState>()(
                 console.log('═══════════════════════════════════════════════════════════');
 
                 if (closeDistance && farDistance) {
-                    // Focal length calculée depuis chaque distance
-                    // f = (cardWidthPx * distance_mm) / CREDIT_CARD_WIDTH_MM
                     const focalClose = (closeDistance.cardWidthPx * CLOSE_DISTANCE_MM) / CREDIT_CARD_WIDTH_MM;
                     const focalFar = (farDistance.cardWidthPx * FAR_DISTANCE_MM) / CREDIT_CARD_WIDTH_MM;
                     const focalAvg = (focalClose + focalFar) / 2;
@@ -253,9 +286,8 @@ export const useCalibrationStore = create<CalibrationState>()(
                         focalLength: focalFar.toFixed(1),
                     });
 
-                    // Vérification : le ratio devrait être ~2 (40cm / 20cm)
                     const actualRatio = closeDistance.cardWidthPx / farDistance.cardWidthPx;
-                    const expectedRatio = FAR_DISTANCE_MM / CLOSE_DISTANCE_MM; // 2.0
+                    const expectedRatio = FAR_DISTANCE_MM / CLOSE_DISTANCE_MM;
 
                     console.log('[Z-Calibration] Vérification ratio:', {
                         actual: actualRatio.toFixed(3),
@@ -264,52 +296,19 @@ export const useCalibrationStore = create<CalibrationState>()(
                     });
 
                     console.log('[Z-Calibration] 🎯 Focal length moyenne:', focalAvg.toFixed(1), 'pixels');
-
-                    // Calcul du FOV horizontal estimé
-                    // FOV = 2 * atan((sensorWidth / 2) / focalLength)
-                    // Approximation : sensorWidth ≈ cardWidthPx à distance connue
-                    const fovRadians = 2 * Math.atan((closeDistance.cardWidthPx / 2) / focalClose);
-                    const fovDegrees = fovRadians * (180 / Math.PI);
-
-                    console.log('[Z-Calibration] 📷 FOV horizontal estimé:', fovDegrees.toFixed(1) + '°');
-
-                    // Formule pour utilisation temps réel :
-                    console.log('[Z-Calibration] 💡 Formule temps réel:');
-                    console.log('   Z_mm = (tailleReelleMm * ' + focalAvg.toFixed(0) + ') / taillePixels');
-
-                    // Exemple avec la main calibrée
-                    if (closeMeasurements) {
-                        const handWidthMm = closeMeasurements.handWidthPx / closeDistance.pixelsPerMm;
-                        console.log('[Z-Calibration] 🖐️ Main calibrée:', {
-                            largeurPx: closeMeasurements.handWidthPx.toFixed(0),
-                            largeurMm: handWidthMm.toFixed(1),
-                            hauteurPx: closeMeasurements.handHeightPx.toFixed(0),
-                        });
-                    }
                 }
 
                 console.log('═══════════════════════════════════════════════════════════');
 
                 set({
-                    finalFingerSizes: {
-                        index: closeMeasurements.index?.ringSizes ?? null,
-                        middle: closeMeasurements.middle?.ringSizes ?? null,
-                        ring: closeMeasurements.ring?.ringSizes ?? null,
-                        pinky: closeMeasurements.pinky?.ringSizes ?? null,
-                    },
+                    finalFingerSizes: finalSizes,
                     skeletonScaleFactor: scaleFactor,
                     isCalibrated: true,
                     isCalibrating: false,
                     currentStep: 5,
                 });
 
-                console.log('[Calibration] ✅ Calibration terminée:', {
-                    index: closeMeasurements.index?.ringSizes,
-                    middle: closeMeasurements.middle?.ringSizes,
-                    ring: closeMeasurements.ring?.ringSizes,
-                    pinky: closeMeasurements.pinky?.ringSizes,
-                    scaleFactor,
-                });
+                console.log('[Calibration] ✅ Calibration terminée (moyenne 20cm+40cm):', finalSizes);
             },
 
             resetCalibration: () => set({
