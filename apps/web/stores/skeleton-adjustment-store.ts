@@ -9,6 +9,7 @@ interface SkeletonAdjustmentState {
   // Offsets de position (en pixels)
   offsetX: number;
   offsetY: number;
+  offsetZ: number;
 
   // Facteurs d'échelle indépendants (1.0 = 100%)
   scaleX: number;
@@ -17,6 +18,7 @@ interface SkeletonAdjustmentState {
   // Actions
   setOffsetX: (value: number) => void;
   setOffsetY: (value: number) => void;
+  setOffsetZ: (value: number) => void;
   setScaleX: (value: number) => void;
   setScaleY: (value: number) => void;
   reset: () => void;
@@ -25,6 +27,7 @@ interface SkeletonAdjustmentState {
 const DEFAULT_VALUES = {
   offsetX: 0,
   offsetY: 0,
+  offsetZ: 0,
   scaleX: 1.0,
   scaleY: 1.0,
 };
@@ -34,6 +37,7 @@ export const useSkeletonAdjustmentStore = create<SkeletonAdjustmentState>()((set
 
   setOffsetX: (value) => set({ offsetX: value }),
   setOffsetY: (value) => set({ offsetY: value }),
+  setOffsetZ: (value) => set({ offsetZ: value }),
   setScaleX: (value) => set({ scaleX: value }),
   setScaleY: (value) => set({ scaleY: value }),
 

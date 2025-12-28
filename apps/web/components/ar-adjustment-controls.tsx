@@ -87,6 +87,23 @@ export function ARAdjustmentControls() {
                             />
                         </div>
 
+                        {/* Position Z */}
+                        <div>
+                            <div className="flex justify-between mb-0.5">
+                                <label>Position Z</label>
+                                <span className="text-gray-400">{skeleton.offsetZ.toFixed(0)}px</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="-200"
+                                max="200"
+                                step="1"
+                                value={skeleton.offsetZ}
+                                onChange={(e) => skeleton.setOffsetZ(Number(e.target.value))}
+                                className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
+                            />
+                        </div>
+
                         {/* Échelle X */}
                         <div>
                             <div className="flex justify-between mb-0.5">
