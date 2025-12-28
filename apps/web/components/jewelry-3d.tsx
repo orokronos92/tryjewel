@@ -134,6 +134,7 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
     const boneAxesRef = useRef<THREE.Group | null>(null);
     const lastLogRef = useRef<number>(0);
     const lastZFactorLogRef = useRef<number>(0);  // ⚡ Pour logs calibration Z
+    const lastZDebugLogRef = useRef<number>(0);   // ⚡ Pour logs Z DEBUG (séparé!)
     const occludersRef = useRef<Map<string, THREE.Mesh>>(new Map());
     const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
     const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -437,25 +438,50 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             const centerX = landmarks.reduce((s, l) => s + l.x, 0) / landmarks.length;
             const centerY = landmarks.reduce((s, l) => s + l.y, 0) / landmarks.length;
 
-            // Log périodique pour debug Z
-            const nowZ = Date.now();
-            if (nowZ - lastZFactorLogRef.current > 3000) {
-                lastZFactorLogRef.current = nowZ;
-                console.log('%c[Z DEBUG] 🔵', 'color: #00AAFF; font-weight: bold', {
+            // Log périodique pour debug Z - UTILISE REF SÉPARÉE!
+            const nowZDebug = Date.now();
+            if (nowZDebug - lastZDebugLogRef.current > 1500) {
+                lastZDebugLogRef.current = nowZDebug;
+                const currentOffsetZ = skelAdj.offsetZ;
+                console.log('%c[Z DEBUG] 🔵 skelAdj.offsetZ =', 'color: #00AAFF; font-weight: bold; font-size: 14px', currentOffsetZ, {
                     zFactor: zFactor.toFixed(3),
-                    offsetZ: skelAdj.offsetZ || 0,
-                    offsetZEffect: ((skelAdj.offsetZ || 0) / 500).toFixed(4),
-                    isCalibrated,
-                    skeletonScaleFactor: skeletonScaleFactor?.toFixed(3) || 'N/A',
+                    offsetZType: typeof currentOffsetZ,
+                    offsetZRaw: currentOffsetZ,
+                    offsetZEffect: (currentOffsetZ / 500).toFixed(4),
+                    skelAdjKeys: Object.keys(skelAdj),
+                    skelAdjSnapshot: {
+                        offsetX: skelAdj.offsetX,
+                        offsetY: skelAdj.offsetY,
+                        offsetZ: skelAdj.offsetZ,
+                        scaleX: skelAdj.scaleX,
+                        scaleY: skelAdj.scaleY,
+                    }
                 });
             }
 
-            const positions = landmarks.map((lm) => {
+            // ⚡ Z offset effect - lecture depuis skelAdj
+            const zOffsetValue = skelAdj.offsetZ ?? 0;
+            const zOffsetEffect = zOffsetValue / 500;
+
+            const positions = landmarks.map((lm, idx) => {
                 const scaledX = centerX + (lm.x - centerX) * scaleX + skelAdj.offsetX / width;
                 const scaledY = centerY + (lm.y - centerY) * scaleY + skelAdj.offsetY / height;
                 // ✅ Utiliser -lm.z avec zFactor calibré + offsetZ pour ajustement manuel
-                // offsetZ divisé par 500 pour avoir un effet subtil sur la profondeur
-                const scaledZ = -lm.z * zFactor + (skelAdj.offsetZ || 0) / 500;
+                // offsetZ divisé par 500 pour avoir un effet visible sur la profondeur
+                const baseZ = -lm.z * zFactor;
+                const scaledZ = baseZ + zOffsetEffect;
+
+                // Log détaillé pour le premier landmark (wrist) uniquement
+                if (idx === 0 && nowZDebug - lastZDebugLogRef.current < 100) {
+                    console.log('%c[Z CALC] 🎯 Landmark 0 (wrist)', 'color: #FF00FF; font-weight: bold', {
+                        'lm.z': lm.z.toFixed(4),
+                        baseZ: baseZ.toFixed(4),
+                        zOffsetValue,
+                        zOffsetEffect: zOffsetEffect.toFixed(4),
+                        scaledZ: scaledZ.toFixed(4),
+                    });
+                }
+
                 return new THREE.Vector3((scaledX - 0.5) * aspect, 0.5 - scaledY, scaledZ);
             });
 
