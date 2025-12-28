@@ -7,7 +7,8 @@ type Props = {
   height: number;
   x?: number;
   y?: number;
-  scale?: number;
+  scaleX?: number;  // Scale horizontal indépendant
+  scaleY?: number;  // Scale vertical indépendant
   stroke?: string;
   strokeWidth?: number;
   opacity?: number;
@@ -21,7 +22,8 @@ export default function HandCalibrationFrame({
   height,
   x,
   y,
-  scale = 1,
+  scaleX = 1,
+  scaleY = 1,
   stroke = "#22c55e",
   strokeWidth = 3,
   opacity = 1,
@@ -34,9 +36,10 @@ export default function HandCalibrationFrame({
   const vbW = 200;
   const vbH = 280;
 
+  // Scale X et Y indépendants pour ajuster largeur/hauteur séparément
   const transform = `
     translate(${cx} ${cy})
-    scale(${scale})
+    scale(${scaleX} ${scaleY})
     translate(${-vbW / 2} ${-vbH / 2})
   `;
 

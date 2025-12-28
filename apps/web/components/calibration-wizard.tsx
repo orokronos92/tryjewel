@@ -308,22 +308,38 @@ export function CalibrationWizard({
             );
         }
 
-        // Type = hand - Contour de MAIN ajustable (vraie silhouette SVG)
-        // Le SVG fait 200x280, on scale pour que la largeur = handWidthPx
+        // Type = hand - Contour de MAIN ajustable
+        // SVG fait 200x280, scaleX et scaleY INDÉPENDANTS
         const svgOriginalWidth = 200;
         const svgOriginalHeight = 280;
-        const handScale = handWidthPx / svgOriginalWidth;
-        const scaledHeight = svgOriginalHeight * handScale;
+        const scaleX = handWidthPx / svgOriginalWidth;
+        const scaleY = handHeightPx / svgOriginalHeight;
 
         return (
-            <div className="relative w-full h-full flex flex-col">
-                {/* Zone centrale - contour de main SVG réaliste */}
-                <div className="flex-1 flex items-center justify-center relative overflow-hidden">
-                    {/* HandCalibrationFrame avec scale calculé */}
+            <div className="relative w-full h-full flex">
+                {/* Slider Largeur - côté GAUCHE vertical */}
+                <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1 z-10">
+                    <span className="text-green-400 font-mono text-xs">{Math.round(handWidthPx)}px</span>
+                    <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={handWidthSlider}
+                        onChange={(e) => setHandWidthSlider(Number(e.target.value))}
+                        className="w-24 h-2 bg-white/30 rounded-lg appearance-none cursor-pointer accent-green-500"
+                        style={{ transform: 'rotate(-90deg)', transformOrigin: 'center' }}
+                    />
+                    <span className="text-white/60 text-xs">Largeur</span>
+                </div>
+
+                {/* Zone centrale - contour de main */}
+                <div className="flex-1 flex items-center justify-center relative">
                     <HandCalibrationFrame
                         width={containerWidth}
                         height={containerHeight}
-                        scale={handScale}
+                        scaleX={scaleX}
+                        scaleY={scaleY}
                         stroke="#22c55e"
                         strokeWidth={3}
                         opacity={1}
@@ -334,13 +350,13 @@ export function CalibrationWizard({
                         const ppm = step.distance === 'close' ? closeDistance?.pixelsPerMm : farDistance?.pixelsPerMm;
                         if (!ppm) return null;
                         const widthMm = Math.round(handWidthPx / ppm);
-                        const heightMm = Math.round(scaledHeight / ppm);
+                        const heightMm = Math.round(handHeightPx / ppm);
                         return (
                             <>
-                                <div className="absolute top-1/2 right-4 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                                <div className="absolute top-1/2 right-16 -translate-y-1/2 bg-black/50 px-2 py-0.5 rounded text-sm font-mono text-green-400">
                                     {heightMm} mm
                                 </div>
-                                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                                <div className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-black/50 px-2 py-0.5 rounded text-sm font-mono text-green-400">
                                     {widthMm} mm
                                 </div>
                             </>
@@ -348,47 +364,20 @@ export function CalibrationWizard({
                     })()}
                 </div>
 
-                {/* Sliders en bas - plus transparent pour voir la main */}
-                <div className="bg-black/30 backdrop-blur-sm p-3 rounded-t-lg space-y-2">
-                    <p className="text-center text-white/80 text-xs">
-                        Ajustez le contour
-                    </p>
-
-                    {/* Slider Largeur */}
-                    <div className="max-w-md mx-auto">
-                        <div className="flex justify-between text-xs text-white/70">
-                            <span>Fine</span>
-                            <span className="text-green-400 font-mono">{Math.round(handWidthPx)}px</span>
-                            <span>Large</span>
-                        </div>
-                        <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            step="1"
-                            value={handWidthSlider}
-                            onChange={(e) => setHandWidthSlider(Number(e.target.value))}
-                            className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer accent-green-500"
-                        />
-                    </div>
-
-                    {/* Slider Hauteur */}
-                    <div className="max-w-md mx-auto">
-                        <div className="flex justify-between text-xs text-white/70">
-                            <span>Courte</span>
-                            <span className="text-green-400 font-mono">{Math.round(scaledHeight)}px</span>
-                            <span>Longue</span>
-                        </div>
-                        <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            step="1"
-                            value={handHeightSlider}
-                            onChange={(e) => setHandHeightSlider(Number(e.target.value))}
-                            className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer accent-green-500"
-                        />
-                    </div>
+                {/* Slider Hauteur - côté DROIT vertical */}
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1 z-10">
+                    <span className="text-green-400 font-mono text-xs">{Math.round(handHeightPx)}px</span>
+                    <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={handHeightSlider}
+                        onChange={(e) => setHandHeightSlider(Number(e.target.value))}
+                        className="w-24 h-2 bg-white/30 rounded-lg appearance-none cursor-pointer accent-green-500"
+                        style={{ transform: 'rotate(-90deg)', transformOrigin: 'center' }}
+                    />
+                    <span className="text-white/60 text-xs">Hauteur</span>
                 </div>
             </div>
         );
