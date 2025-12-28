@@ -348,18 +348,18 @@ export function CalibrationWizard({
                     })()}
                 </div>
 
-                {/* Sliders en bas */}
-                <div className="bg-black/70 p-4 rounded-t-lg space-y-3">
-                    <p className="text-center text-gray-300 text-sm mb-2">
-                        Ajustez le contour pour qu'il corresponde à votre main
+                {/* Sliders en bas - plus transparent pour voir la main */}
+                <div className="bg-black/30 backdrop-blur-sm p-3 rounded-t-lg space-y-2">
+                    <p className="text-center text-white/80 text-xs">
+                        Ajustez le contour
                     </p>
 
                     {/* Slider Largeur */}
-                    <div className="max-w-md mx-auto space-y-1">
-                        <div className="flex justify-between text-xs text-gray-300">
+                    <div className="max-w-md mx-auto">
+                        <div className="flex justify-between text-xs text-white/70">
                             <span>Fine</span>
-                            <span className="text-green-400 font-mono">Largeur: {Math.round(handWidthPx)}px</span>
-                            <span>Épaisse</span>
+                            <span className="text-green-400 font-mono">{Math.round(handWidthPx)}px</span>
+                            <span>Large</span>
                         </div>
                         <input
                             type="range"
@@ -368,15 +368,15 @@ export function CalibrationWizard({
                             step="1"
                             value={handWidthSlider}
                             onChange={(e) => setHandWidthSlider(Number(e.target.value))}
-                            className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
+                            className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer accent-green-500"
                         />
                     </div>
 
                     {/* Slider Hauteur */}
-                    <div className="max-w-md mx-auto space-y-1">
-                        <div className="flex justify-between text-xs text-gray-300">
+                    <div className="max-w-md mx-auto">
+                        <div className="flex justify-between text-xs text-white/70">
                             <span>Courte</span>
-                            <span className="text-green-400 font-mono">Hauteur: {Math.round(handHeightPx)}px</span>
+                            <span className="text-green-400 font-mono">{Math.round(scaledHeight)}px</span>
                             <span>Longue</span>
                         </div>
                         <input
@@ -386,7 +386,7 @@ export function CalibrationWizard({
                             step="1"
                             value={handHeightSlider}
                             onChange={(e) => setHandHeightSlider(Number(e.target.value))}
-                            className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
+                            className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer accent-green-500"
                         />
                     </div>
                 </div>
