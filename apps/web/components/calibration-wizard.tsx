@@ -14,20 +14,20 @@ import { useEdgeTrackingStore } from "@/stores/edge-tracking-store";
 import { Button } from "@/components/ui/button";
 import { CreditCard, Hand, Check, X, ChevronRight, Loader2 } from "lucide-react";
 
-// Ratios anatomiques pour la largeur des doigts par rapport à la largeur de la paume
-const FINGER_WIDTH_RATIOS = {
-    index: 0.22,   // ~22% de la largeur paume
-    middle: 0.23,  // ~23% de la largeur paume (le plus large)
-    ring: 0.21,    // ~21% de la largeur paume
-    pinky: 0.18,   // ~18% de la largeur paume (le plus fin)
-};
-
-// Ratio profondeur/largeur pour les doigts (ellipse)
+// Ratio profondeur/largeur pour les doigts (ellipse, doigt vu de face vs profil)
 const FINGER_DEPTH_RATIO = 0.85;
 
 // Dimensions anatomiques moyennes d'une main adulte (en mm)
 // Largeur paume (entre index MCP et pinky MCP) ≈ 85mm
 const PALM_WIDTH_MM = 85;
+
+// Indices des landmarks MCP (base des doigts) - MediaPipe
+const MCP_LANDMARKS = {
+    index: 5,
+    middle: 9,
+    ring: 13,
+    pinky: 17,
+};
 
 // Tolérance pour la détection de distance (±15%)
 const DISTANCE_TOLERANCE = 0.15;
@@ -119,18 +119,79 @@ export function CalibrationWizard({
     const [capturedLandmarks, setCapturedLandmarks] = useState<typeof landmarks | null>(null);
     const [stabilityCounter, setStabilityCounter] = useState(0);
 
-    // Fonction pour calculer les mesures d'un doigt
-    const calculateFingerMeasurement = (
-        fingerName: keyof typeof FINGER_WIDTH_RATIOS,
-        palmWidthMm: number
+    // Fonction pour calculer la distance entre deux landmarks en pixels
+    const getLandmarkDistancePx = (
+        lm: typeof landmarks,
+        idx1: number,
+        idx2: number
+    ): number => {
+        if (!lm || lm.length < 21) return 0;
+        const dx = (lm[idx1].x - lm[idx2].x) * containerWidth;
+        const dy = (lm[idx1].y - lm[idx2].y) * containerHeight;
+        return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    // Fonction pour calculer les mesures d'un doigt à partir des landmarks réels
+    const calculateFingerMeasurementFromLandmarks = (
+        fingerName: 'index' | 'middle' | 'ring' | 'pinky',
+        lm: typeof landmarks,
+        pixelsPerMm: number
     ): FingerMeasurement => {
-        const widthMm = palmWidthMm * FINGER_WIDTH_RATIOS[fingerName];
+        if (!lm || lm.length < 21) {
+            return {
+                widthPx: 0,
+                widthMm: 0,
+                depthMm: 0,
+                circumferenceMm: 0,
+                ringSizes: { circumferenceMm: 0, eu: 0, us: 0, uk: 'M' },
+            };
+        }
+
+        // Calculer la largeur du doigt basée sur l'espacement inter-MCP
+        // La largeur d'un doigt ≈ distance entre son MCP et le MCP adjacent
+        let widthPx: number;
+
+        switch (fingerName) {
+            case 'index':
+                // Largeur index ≈ distance index-middle MCP / 2 (le doigt occupe ~moitié de l'espace)
+                widthPx = getLandmarkDistancePx(lm, MCP_LANDMARKS.index, MCP_LANDMARKS.middle) * 0.6;
+                break;
+            case 'middle':
+                // Largeur middle ≈ moyenne des espaces adjacents
+                widthPx = (
+                    getLandmarkDistancePx(lm, MCP_LANDMARKS.index, MCP_LANDMARKS.middle) +
+                    getLandmarkDistancePx(lm, MCP_LANDMARKS.middle, MCP_LANDMARKS.ring)
+                ) * 0.35;
+                break;
+            case 'ring':
+                // Largeur ring ≈ moyenne des espaces adjacents
+                widthPx = (
+                    getLandmarkDistancePx(lm, MCP_LANDMARKS.middle, MCP_LANDMARKS.ring) +
+                    getLandmarkDistancePx(lm, MCP_LANDMARKS.ring, MCP_LANDMARKS.pinky)
+                ) * 0.35;
+                break;
+            case 'pinky':
+                // Largeur pinky ≈ distance ring-pinky MCP / 2
+                widthPx = getLandmarkDistancePx(lm, MCP_LANDMARKS.ring, MCP_LANDMARKS.pinky) * 0.55;
+                break;
+        }
+
+        // Convertir en mm avec le pixelsPerMm calibré
+        const widthMm = widthPx / pixelsPerMm;
         const depthMm = widthMm * FINGER_DEPTH_RATIO;
         const circumferenceMm = ellipseCircumference(widthMm, depthMm);
         const ringSizes = circumferenceToRingSizes(circumferenceMm);
 
+        console.log(`[Calibration] 📐 ${fingerName}:`, {
+            widthPx: widthPx.toFixed(1),
+            widthMm: widthMm.toFixed(1),
+            depthMm: depthMm.toFixed(1),
+            circumferenceMm: circumferenceMm.toFixed(1),
+            euSize: ringSizes.eu,
+        });
+
         return {
-            widthPx: 0,
+            widthPx,
             widthMm,
             depthMm,
             circumferenceMm,
@@ -236,9 +297,6 @@ export function CalibrationWizard({
                 return;
             }
 
-            // La largeur de paume détectée par MediaPipe, convertie en mm
-            const palmWidthMm = detectedPalmWidthPx / currentPixelsPerMm;
-
             // Calculer la hauteur de main approximative
             const wrist = capturedLandmarks[0];
             const middleTip = capturedLandmarks[12];
@@ -247,24 +305,27 @@ export function CalibrationWizard({
                 Math.pow((middleTip.y - wrist.y) * containerHeight, 2)
             );
 
-            console.log('[Calibration] 📏 MediaPipe - Mesures:', {
+            // La largeur de paume détectée par MediaPipe, convertie en mm
+            const palmWidthMm = detectedPalmWidthPx / currentPixelsPerMm;
+
+            console.log('[Calibration] 📏 MediaPipe - Mesures paume:', {
                 palmWidthPx: detectedPalmWidthPx.toFixed(1),
                 palmWidthMm: palmWidthMm.toFixed(1),
                 handHeightPx: handHeightPx.toFixed(1),
                 pixelsPerMm: currentPixelsPerMm.toFixed(3),
             });
 
-            // Calculer les mesures de chaque doigt basées sur la paume réelle
+            // Calculer les mesures de chaque doigt à partir des VRAIS landmarks
             const handMeasurements: HandMeasurements = {
                 handWidthPx: detectedPalmWidthPx,
                 handHeightPx,
-                index: calculateFingerMeasurement('index', palmWidthMm),
-                middle: calculateFingerMeasurement('middle', palmWidthMm),
-                ring: calculateFingerMeasurement('ring', palmWidthMm),
-                pinky: calculateFingerMeasurement('pinky', palmWidthMm),
+                index: calculateFingerMeasurementFromLandmarks('index', capturedLandmarks, currentPixelsPerMm),
+                middle: calculateFingerMeasurementFromLandmarks('middle', capturedLandmarks, currentPixelsPerMm),
+                ring: calculateFingerMeasurementFromLandmarks('ring', capturedLandmarks, currentPixelsPerMm),
+                pinky: calculateFingerMeasurementFromLandmarks('pinky', capturedLandmarks, currentPixelsPerMm),
             };
 
-            console.log('[Calibration] 💍 Tailles bagues calculées:', {
+            console.log('[Calibration] 💍 Tailles bagues (depuis landmarks réels):', {
                 index: handMeasurements.index?.ringSizes.eu,
                 middle: handMeasurements.middle?.ringSizes.eu,
                 ring: handMeasurements.ring?.ringSizes.eu,
