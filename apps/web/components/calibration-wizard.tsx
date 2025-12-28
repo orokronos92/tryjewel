@@ -151,35 +151,34 @@ export function CalibrationWizard({
         : farDistance?.cardWidthPx;
 
     // Conversion slider vers pixels pour la main
-    // Base : 90% de la largeur de la carte (main ≈ carte)
+    // Base : 90% de la largeur de la carte, ajustement ±25%
     const getHandWidthPx = (val: number) => {
         if (currentCardWidthPx) {
             // Slider 50 = 90% de la carte
-            // Slider permet ajustement de 60% à 120% de la carte
-            const minRatio = 0.6;
-            const maxRatio = 1.2;
+            // ±25% = de 65% à 115%
+            const baseRatio = 0.9;
+            const adjustment = 0.25;
+            const minRatio = baseRatio - adjustment; // 0.65
+            const maxRatio = baseRatio + adjustment; // 1.15
             const targetRatio = minRatio + (val / 100) * (maxRatio - minRatio);
             return currentCardWidthPx * targetRatio;
         }
-        // Fallback si pas de calibration carte
-        const baseMin = containerWidth * 0.15;
-        const baseMax = containerWidth * 0.5;
-        return baseMin + (val / 100) * (baseMax - baseMin);
+        // Fallback
+        return containerWidth * 0.35;
     };
 
     const getHandHeightPx = (val: number) => {
         if (currentCardWidthPx) {
-            // Hauteur main ≈ 2x largeur carte (ratio anatomique ~1.8-2.0)
-            // Slider 50 = 180% de la carte en hauteur
-            const minRatio = 1.2;
-            const maxRatio = 2.4;
+            // Hauteur main ≈ 180% largeur carte, ajustement ±25%
+            const baseRatio = 1.8;
+            const adjustment = 0.45; // 25% de 1.8
+            const minRatio = baseRatio - adjustment; // 1.35
+            const maxRatio = baseRatio + adjustment; // 2.25
             const targetRatio = minRatio + (val / 100) * (maxRatio - minRatio);
             return currentCardWidthPx * targetRatio;
         }
-        // Fallback si pas de calibration carte
-        const baseMin = containerHeight * 0.25;
-        const baseMax = containerHeight * 0.7;
-        return baseMin + (val / 100) * (baseMax - baseMin);
+        // Fallback
+        return containerHeight * 0.5;
     };
 
     // Calculer les dimensions avec clamp pour rester visible
