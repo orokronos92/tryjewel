@@ -100,6 +100,10 @@ interface CalibrationState {
 const CREDIT_CARD_WIDTH_MM = 85.6;
 const CREDIT_CARD_HEIGHT_MM = 53.98;
 
+// Distances de calibration (en mm)
+const CLOSE_DISTANCE_MM = 200; // 20cm
+const FAR_DISTANCE_MM = 400;   // 40cm
+
 // Conversion US ring size
 const US_SIZE_OFFSET = 36.5;
 const US_SIZE_DIVISOR = 2.55;
@@ -222,6 +226,69 @@ export const useCalibrationStore = create<CalibrationState>()(
                     // Le facteur d'échelle sera utilisé pour ajuster le squelette
                     scaleFactor = distanceRatio;
                 }
+
+                // =====================================================================
+                // LOGS Z CALIBRATION - Calcul de la focal length et estimation Z
+                // =====================================================================
+                console.log('═══════════════════════════════════════════════════════════');
+                console.log('[Z-Calibration] 📐 CALCUL DE PROFONDEUR');
+                console.log('═══════════════════════════════════════════════════════════');
+
+                if (closeDistance && farDistance) {
+                    // Focal length calculée depuis chaque distance
+                    // f = (cardWidthPx * distance_mm) / CREDIT_CARD_WIDTH_MM
+                    const focalClose = (closeDistance.cardWidthPx * CLOSE_DISTANCE_MM) / CREDIT_CARD_WIDTH_MM;
+                    const focalFar = (farDistance.cardWidthPx * FAR_DISTANCE_MM) / CREDIT_CARD_WIDTH_MM;
+                    const focalAvg = (focalClose + focalFar) / 2;
+
+                    console.log('[Z-Calibration] Carte à 20cm:', {
+                        cardWidthPx: closeDistance.cardWidthPx.toFixed(1),
+                        pixelsPerMm: closeDistance.pixelsPerMm.toFixed(3),
+                        focalLength: focalClose.toFixed(1),
+                    });
+
+                    console.log('[Z-Calibration] Carte à 40cm:', {
+                        cardWidthPx: farDistance.cardWidthPx.toFixed(1),
+                        pixelsPerMm: farDistance.pixelsPerMm.toFixed(3),
+                        focalLength: focalFar.toFixed(1),
+                    });
+
+                    // Vérification : le ratio devrait être ~2 (40cm / 20cm)
+                    const actualRatio = closeDistance.cardWidthPx / farDistance.cardWidthPx;
+                    const expectedRatio = FAR_DISTANCE_MM / CLOSE_DISTANCE_MM; // 2.0
+
+                    console.log('[Z-Calibration] Vérification ratio:', {
+                        actual: actualRatio.toFixed(3),
+                        expected: expectedRatio.toFixed(1),
+                        ecart: ((actualRatio - expectedRatio) / expectedRatio * 100).toFixed(1) + '%',
+                    });
+
+                    console.log('[Z-Calibration] 🎯 Focal length moyenne:', focalAvg.toFixed(1), 'pixels');
+
+                    // Calcul du FOV horizontal estimé
+                    // FOV = 2 * atan((sensorWidth / 2) / focalLength)
+                    // Approximation : sensorWidth ≈ cardWidthPx à distance connue
+                    const fovRadians = 2 * Math.atan((closeDistance.cardWidthPx / 2) / focalClose);
+                    const fovDegrees = fovRadians * (180 / Math.PI);
+
+                    console.log('[Z-Calibration] 📷 FOV horizontal estimé:', fovDegrees.toFixed(1) + '°');
+
+                    // Formule pour utilisation temps réel :
+                    console.log('[Z-Calibration] 💡 Formule temps réel:');
+                    console.log('   Z_mm = (tailleReelleMm * ' + focalAvg.toFixed(0) + ') / taillePixels');
+
+                    // Exemple avec la main calibrée
+                    if (closeMeasurements) {
+                        const handWidthMm = closeMeasurements.handWidthPx / closeDistance.pixelsPerMm;
+                        console.log('[Z-Calibration] 🖐️ Main calibrée:', {
+                            largeurPx: closeMeasurements.handWidthPx.toFixed(0),
+                            largeurMm: handWidthMm.toFixed(1),
+                            hauteurPx: closeMeasurements.handHeightPx.toFixed(0),
+                        });
+                    }
+                }
+
+                console.log('═══════════════════════════════════════════════════════════');
 
                 set({
                     finalFingerSizes: {

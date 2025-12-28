@@ -24,6 +24,10 @@ const FINGER_WIDTH_RATIOS = {
 // Ratio profondeur/largeur pour les doigts (ellipse)
 const FINGER_DEPTH_RATIO = 0.85;
 
+// Dimensions anatomiques moyennes d'une main adulte (en mm)
+const HAND_WIDTH_MM = 95;   // Largeur main (doigts écartés)
+const HAND_HEIGHT_MM = 180; // Hauteur main (poignet au bout du majeur)
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -50,29 +54,29 @@ interface StepConfig {
 const STEPS: StepConfig[] = [
     {
         icon: <CreditCard className="h-5 w-5" />,
-        title: "Carte (30cm)",
-        instruction: "Placez une carte bancaire à 30cm de la caméra et ajustez le cadre",
+        title: "Carte (20cm)",
+        instruction: "Placez une carte bancaire à 20cm de la caméra et ajustez le cadre",
         type: 'card',
         distance: 'close',
     },
     {
         icon: <Hand className="h-5 w-5" />,
-        title: "Main (30cm)",
-        instruction: "Gardez la même distance (30cm) et ajustez le contour à votre main",
+        title: "Main (20cm)",
+        instruction: "Gardez la même distance (20cm) et ajustez le contour à votre main",
         type: 'hand',
         distance: 'close',
     },
     {
         icon: <CreditCard className="h-5 w-5" />,
-        title: "Carte (50cm)",
-        instruction: "Reculez à 50cm et ajustez le cadre à la carte",
+        title: "Carte (40cm)",
+        instruction: "Reculez à 40cm et ajustez le cadre à la carte",
         type: 'card',
         distance: 'far',
     },
     {
         icon: <Hand className="h-5 w-5" />,
-        title: "Main (50cm)",
-        instruction: "Gardez la distance (50cm) et ajustez le contour à votre main",
+        title: "Main (40cm)",
+        instruction: "Gardez la distance (40cm) et ajustez le contour à votre main",
         type: 'hand',
         distance: 'far',
     },
@@ -140,37 +144,56 @@ export function CalibrationWizard({
         }
     }, [currentStep, setCurrentStep]);
 
-    // ⚡ FIX: Ajuster la taille initiale selon la distance
-    // À 50cm la main paraît ~2x plus petite qu'à 30cm
-    const distanceScale = step.distance === 'close' ? 1.0 : 0.5;
+    // Récupérer le pixelsPerMm de la carte pour cette distance
+    const currentPixelsPerMm = step.distance === 'close'
+        ? closeDistance?.pixelsPerMm
+        : farDistance?.pixelsPerMm;
 
-    // Conversion slider vers pixels pour la main (avec facteur de distance)
+    // Conversion slider vers pixels pour la main
+    // Utilise pixelsPerMm si disponible, sinon fallback sur pourcentages du container
     const getHandWidthPx = (val: number) => {
+        if (currentPixelsPerMm) {
+            // Taille basée sur dimensions anatomiques réelles
+            // Slider 50 = taille moyenne (HAND_WIDTH_MM)
+            // Slider permet ±30% d'ajustement
+            const minMm = HAND_WIDTH_MM * 0.7;  // 70% de la moyenne
+            const maxMm = HAND_WIDTH_MM * 1.3;  // 130% de la moyenne
+            const targetMm = minMm + (val / 100) * (maxMm - minMm);
+            return targetMm * currentPixelsPerMm;
+        }
+        // Fallback si pas de calibration carte
         const baseMin = containerWidth * 0.15;
         const baseMax = containerWidth * 0.5;
-        // Appliquer le facteur de distance
-        const min = baseMin * distanceScale;
-        const max = baseMax * distanceScale;
-        return min + (val / 100) * (max - min);
+        return baseMin + (val / 100) * (baseMax - baseMin);
     };
 
     const getHandHeightPx = (val: number) => {
+        if (currentPixelsPerMm) {
+            // Taille basée sur dimensions anatomiques réelles
+            const minMm = HAND_HEIGHT_MM * 0.7;
+            const maxMm = HAND_HEIGHT_MM * 1.3;
+            const targetMm = minMm + (val / 100) * (maxMm - minMm);
+            return targetMm * currentPixelsPerMm;
+        }
+        // Fallback si pas de calibration carte
         const baseMin = containerHeight * 0.25;
         const baseMax = containerHeight * 0.7;
-        // Appliquer le facteur de distance
-        const min = baseMin * distanceScale;
-        const max = baseMax * distanceScale;
-        return min + (val / 100) * (max - min);
+        return baseMin + (val / 100) * (baseMax - baseMin);
     };
 
-    const handWidthPx = getHandWidthPx(handWidthSlider);
-    const handHeightPx = getHandHeightPx(handHeightSlider);
+    // Calculer les dimensions avec clamp pour rester visible
+    // Garder une marge de 20% pour les contrôles
+    const maxWidth = containerWidth * 0.8;
+    const maxHeight = containerHeight * 0.6; // Laisser place aux sliders en bas
+
+    const handWidthPx = Math.min(getHandWidthPx(handWidthSlider), maxWidth);
+    const handHeightPx = Math.min(getHandHeightPx(handHeightSlider), maxHeight);
 
     // Confirmer l'étape actuelle
     const handleConfirm = () => {
         if (step.type === 'card') {
             // Sauvegarder la calibration carte (taille FIXE)
-            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.35 : containerWidth * 0.18;
+            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.40 : containerWidth * 0.20;
             if (step.distance === 'close') {
                 setCloseCardCalibration(fixedCardWidth);
             } else {
@@ -263,8 +286,8 @@ export function CalibrationWizard({
 
         if (step.type === 'card') {
             // Taille FIXE du cadre carte (pas de slider)
-            // À 30cm: ~337px, à 50cm: ~169px (environ 2x plus petit)
-            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.35 : containerWidth * 0.18;
+            // À 20cm: carte plus grande (~40% container), à 40cm: ~20% (ratio 2x)
+            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.40 : containerWidth * 0.20;
             const fixedCardHeight = fixedCardWidth / (CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM);
 
             return (
@@ -298,8 +321,8 @@ export function CalibrationWizard({
                     <div className="bg-black/70 p-4 rounded-t-lg text-center">
                         <p className="text-gray-300">
                             {step.distance === 'close'
-                                ? "Placez votre carte dans le cadre à ~30cm"
-                                : "Reculez à ~50cm et placez la carte dans le cadre"
+                                ? "Placez votre carte dans le cadre à ~20cm"
+                                : "Reculez à ~40cm et placez la carte dans le cadre"
                             }
                         </p>
                     </div>
