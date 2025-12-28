@@ -153,26 +153,26 @@ export function CalibrationWizard({
 
         switch (fingerName) {
             case 'index':
-                // Largeur index ≈ distance index-middle MCP / 2 (le doigt occupe ~moitié de l'espace)
-                widthPx = getLandmarkDistancePx(lm, MCP_LANDMARKS.index, MCP_LANDMARKS.middle) * 0.6;
+                // Largeur index ≈ distance index-middle MCP (le doigt occupe quasi tout l'espace)
+                widthPx = getLandmarkDistancePx(lm, MCP_LANDMARKS.index, MCP_LANDMARKS.middle) * 0.95;
                 break;
             case 'middle':
                 // Largeur middle ≈ moyenne des espaces adjacents
                 widthPx = (
                     getLandmarkDistancePx(lm, MCP_LANDMARKS.index, MCP_LANDMARKS.middle) +
                     getLandmarkDistancePx(lm, MCP_LANDMARKS.middle, MCP_LANDMARKS.ring)
-                ) * 0.35;
+                ) * 0.55;
                 break;
             case 'ring':
                 // Largeur ring ≈ moyenne des espaces adjacents
                 widthPx = (
                     getLandmarkDistancePx(lm, MCP_LANDMARKS.middle, MCP_LANDMARKS.ring) +
                     getLandmarkDistancePx(lm, MCP_LANDMARKS.ring, MCP_LANDMARKS.pinky)
-                ) * 0.35;
+                ) * 0.55;
                 break;
             case 'pinky':
-                // Largeur pinky ≈ distance ring-pinky MCP / 2
-                widthPx = getLandmarkDistancePx(lm, MCP_LANDMARKS.ring, MCP_LANDMARKS.pinky) * 0.55;
+                // Largeur pinky ≈ distance ring-pinky MCP
+                widthPx = getLandmarkDistancePx(lm, MCP_LANDMARKS.ring, MCP_LANDMARKS.pinky) * 0.85;
                 break;
         }
 
