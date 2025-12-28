@@ -321,41 +321,67 @@ export function CalibrationWizard({
                         }}
                         className="relative"
                     >
-                        {/* SVG silhouette de main - 5 doigts */}
+                        {/* SVG silhouette de main réaliste - 5 doigts */}
                         <svg
                             width="100%"
                             height="100%"
-                            viewBox="0 0 100 140"
-                            preserveAspectRatio="none"
+                            viewBox="0 0 120 160"
+                            preserveAspectRatio="xMidYMid meet"
                             className="overflow-visible"
                         >
-                            {/* Paume */}
-                            <rect x="20" y="55" width="60" height="70" rx="10"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Index */}
-                            <rect x="25" y="10" width="12" height="50" rx="6"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Majeur */}
-                            <rect x="40" y="5" width="12" height="55" rx="6"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Annulaire */}
-                            <rect x="55" y="10" width="12" height="50" rx="6"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Auriculaire */}
-                            <rect x="70" y="20" width="10" height="40" rx="5"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Pouce */}
-                            <ellipse cx="10" cy="75" rx="12" ry="25" transform="rotate(-20, 10, 75)"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Poignet */}
-                            <rect x="30" y="120" width="40" height="20" rx="5"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+                            {/* Main complète - un seul path réaliste */}
+                            <path
+                                fill="rgba(34, 197, 94, 0.25)"
+                                stroke="#22c55e"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="
+                                    M 45 155
+                                    L 45 130
+                                    Q 20 125, 12 100
+                                    Q 5 75, 8 55
+                                    L 12 35
+                                    Q 14 25, 20 22
+                                    Q 28 18, 32 28
+                                    L 35 50
+                                    L 35 30
+                                    L 32 12
+                                    Q 32 4, 40 2
+                                    Q 48 0, 52 4
+                                    Q 56 8, 55 16
+                                    L 52 35
+                                    L 55 18
+                                    L 57 6
+                                    Q 58 0, 65 0
+                                    Q 72 0, 75 4
+                                    Q 78 8, 76 18
+                                    L 72 40
+                                    L 76 22
+                                    Q 78 12, 85 12
+                                    Q 92 12, 95 18
+                                    Q 98 24, 95 35
+                                    L 88 55
+                                    L 92 40
+                                    Q 95 30, 102 32
+                                    Q 109 34, 110 42
+                                    Q 112 50, 108 62
+                                    L 100 85
+                                    Q 105 100, 102 120
+                                    Q 98 140, 75 148
+                                    L 75 155
+                                    Z
+                                "
+                            />
+                            {/* Ligne poignet en pointillés */}
+                            <line
+                                x1="45" y1="140"
+                                x2="75" y2="140"
+                                stroke="#22c55e"
+                                strokeWidth="1.5"
+                                strokeDasharray="4 3"
+                                opacity="0.6"
+                            />
                         </svg>
                     </div>
 
