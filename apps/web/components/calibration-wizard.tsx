@@ -326,7 +326,7 @@ export function CalibrationWizard({
                             width="100%"
                             height="100%"
                             viewBox="0 0 120 160"
-                            preserveAspectRatio="xMidYMid meet"
+                            preserveAspectRatio="none"
                             className="overflow-visible"
                         >
                             {/* Main complète - un seul path réaliste */}
