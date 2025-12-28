@@ -437,11 +437,26 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             const centerX = landmarks.reduce((s, l) => s + l.x, 0) / landmarks.length;
             const centerY = landmarks.reduce((s, l) => s + l.y, 0) / landmarks.length;
 
+            // Log périodique pour debug Z
+            const nowZ = Date.now();
+            if (nowZ - lastZFactorLogRef.current > 3000) {
+                lastZFactorLogRef.current = nowZ;
+                console.log('%c[Z DEBUG] 🔵', 'color: #00AAFF; font-weight: bold', {
+                    zFactor: zFactor.toFixed(3),
+                    offsetZ: skelAdj.offsetZ || 0,
+                    offsetZEffect: ((skelAdj.offsetZ || 0) / 500).toFixed(4),
+                    isCalibrated,
+                    skeletonScaleFactor: skeletonScaleFactor?.toFixed(3) || 'N/A',
+                });
+            }
+
             const positions = landmarks.map((lm) => {
                 const scaledX = centerX + (lm.x - centerX) * scaleX + skelAdj.offsetX / width;
                 const scaledY = centerY + (lm.y - centerY) * scaleY + skelAdj.offsetY / height;
-                // ✅ Utiliser -lm.z avec zFactor calibré pour matcher la perspective caméra
-                return new THREE.Vector3((scaledX - 0.5) * aspect, 0.5 - scaledY, -lm.z * zFactor);
+                // ✅ Utiliser -lm.z avec zFactor calibré + offsetZ pour ajustement manuel
+                // offsetZ divisé par 500 pour avoir un effet subtil sur la profondeur
+                const scaledZ = -lm.z * zFactor + (skelAdj.offsetZ || 0) / 500;
+                return new THREE.Vector3((scaledX - 0.5) * aspect, 0.5 - scaledY, scaledZ);
             });
 
             // hand normal for occluders and ring orientation
