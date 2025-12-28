@@ -12,6 +12,7 @@ import {
 } from "@/stores/calibration-store";
 import { Button } from "@/components/ui/button";
 import { CreditCard, Hand, Check, X, ChevronRight } from "lucide-react";
+import HandCalibrationFrame from "@/components/hand-calibration-frame";
 
 // Ratios anatomiques pour la largeur des doigts par rapport à la largeur de la paume
 const FINGER_WIDTH_RATIOS = {
@@ -307,69 +308,41 @@ export function CalibrationWizard({
             );
         }
 
-        // Type = hand - Contour de MAIN ajustable (vraie silhouette)
+        // Type = hand - Contour de MAIN ajustable (vraie silhouette SVG)
+        // Calculer le scale basé sur la taille souhaitée
+        // Le SVG original fait 678x501, on veut le scaler pour que la largeur = handWidthPx
+        const svgOriginalWidth = 678;
+        const svgOriginalHeight = 501;
+        const handScale = handWidthPx / svgOriginalWidth;
+        const scaledHeight = svgOriginalHeight * handScale;
+
         return (
             <div className="relative w-full h-full flex flex-col">
-                {/* Zone centrale - contour de main avec dimensions FIXES (pas flex) */}
+                {/* Zone centrale - contour de main SVG réaliste */}
                 <div className="flex-1 flex items-center justify-center relative overflow-hidden">
-                    {/* Conteneur à taille fixe pour le SVG */}
-                    <div
-                        style={{
-                            width: handWidthPx,
-                            height: handHeightPx,
-                            transition: 'width 0.1s, height 0.1s'
-                        }}
-                        className="relative"
-                    >
-                        {/* SVG silhouette de main - 5 doigts */}
-                        <svg
-                            width="100%"
-                            height="100%"
-                            viewBox="0 0 100 140"
-                            preserveAspectRatio="none"
-                            className="overflow-visible"
-                        >
-                            {/* Paume */}
-                            <rect x="20" y="55" width="60" height="70" rx="10"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Index */}
-                            <rect x="25" y="10" width="12" height="50" rx="6"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Majeur */}
-                            <rect x="40" y="5" width="12" height="55" rx="6"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Annulaire */}
-                            <rect x="55" y="10" width="12" height="50" rx="6"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Auriculaire */}
-                            <rect x="70" y="20" width="10" height="40" rx="5"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Pouce */}
-                            <ellipse cx="10" cy="75" rx="12" ry="25" transform="rotate(-20, 10, 75)"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-
-                            {/* Poignet */}
-                            <rect x="30" y="120" width="40" height="20" rx="5"
-                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
-                        </svg>
-                    </div>
+                    {/* HandCalibrationFrame avec scale calculé */}
+                    <HandCalibrationFrame
+                        width={containerWidth}
+                        height={containerHeight}
+                        scale={handScale}
+                        stroke="#22c55e"
+                        strokeWidth={3}
+                        opacity={1}
+                    />
 
                     {/* Labels dimensions en mm */}
                     {(() => {
                         const ppm = step.distance === 'close' ? closeDistance?.pixelsPerMm : farDistance?.pixelsPerMm;
                         if (!ppm) return null;
+                        const widthMm = Math.round(handWidthPx / ppm);
+                        const heightMm = Math.round(scaledHeight / ppm);
                         return (
                             <>
                                 <div className="absolute top-1/2 right-4 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
-                                    {Math.round(handHeightPx / ppm)} mm
+                                    {heightMm} mm
                                 </div>
                                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
-                                    {Math.round(handWidthPx / ppm)} mm
+                                    {widthMm} mm
                                 </div>
                             </>
                         );
