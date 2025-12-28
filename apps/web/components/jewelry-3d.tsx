@@ -460,14 +460,18 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             }
 
             // ⚡ Z offset effect - lecture depuis skelAdj
+            // Le Z offset affecte AUSSI la position Y pour simuler la perspective
+            // (avec caméra ortho, le Z seul ne change pas la position visuelle)
             const zOffsetValue = skelAdj.offsetZ ?? 0;
-            const zOffsetEffect = zOffsetValue / 500;
+            const zOffsetEffect = zOffsetValue / 500;        // Effet sur le Z réel
+            const zParallaxY = zOffsetValue / 2000;          // Effet parallaxe sur Y (plus subtil)
+            const zParallaxScale = 1 + (zOffsetValue / 1000); // Légère échelle (1 ± 20%)
 
             const positions = landmarks.map((lm, idx) => {
                 const scaledX = centerX + (lm.x - centerX) * scaleX + skelAdj.offsetX / width;
-                const scaledY = centerY + (lm.y - centerY) * scaleY + skelAdj.offsetY / height;
+                // ⚡ Y inclut maintenant l'effet parallaxe du Z
+                const scaledY = centerY + (lm.y - centerY) * scaleY + skelAdj.offsetY / height + zParallaxY;
                 // ✅ Utiliser -lm.z avec zFactor calibré + offsetZ pour ajustement manuel
-                // offsetZ divisé par 500 pour avoir un effet visible sur la profondeur
                 const baseZ = -lm.z * zFactor;
                 const scaledZ = baseZ + zOffsetEffect;
 
@@ -478,6 +482,8 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
                         baseZ: baseZ.toFixed(4),
                         zOffsetValue,
                         zOffsetEffect: zOffsetEffect.toFixed(4),
+                        zParallaxY: zParallaxY.toFixed(4),
+                        zParallaxScale: zParallaxScale.toFixed(3),
                         scaledZ: scaledZ.toFixed(4),
                     });
                 }
@@ -549,7 +555,8 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
 
                     mesh.position.set(bd.position.x, bd.position.y, bd.position.z);
                     mesh.quaternion.copy(bd.quaternion);
-                    mesh.scale.setScalar(bd.length * 8);
+                    // ⚡ Appliquer le même zParallaxScale que la bague
+                    mesh.scale.setScalar(bd.length * 8 * zParallaxScale);
 
                     const occRank = depthOrder.get(conf.fingerName) ?? 2;
                     const isInFront = occRank < ringRank;
@@ -669,8 +676,8 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
 
             ringRef.current.quaternion.copy(targetQuat);
 
-            // scale (local bone length)
-            const baseScale = boneData.length * 8 * effScale;
+            // scale (local bone length) + effet parallaxe Z
+            const baseScale = boneData.length * 8 * effScale * zParallaxScale;
             ringRef.current.scale.setScalar(baseScale);
 
             // =========================
