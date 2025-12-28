@@ -6,6 +6,7 @@ import { useJewelryStore } from "@/stores/jewelry-store";
 import { useSkeletonAdjustmentStore } from "@/stores/skeleton-adjustment-store";
 import { useRingAdjustmentStore } from "@/stores/ring-adjustment-store";
 import { useCameraStore } from "@/stores/camera-store";
+import { useCalibrationStore } from "@/stores/calibration-store";
 import * as THREE from "three";
 // @ts-expect-error
 
@@ -132,6 +133,7 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
     const ringAxesRef = useRef<THREE.Group | null>(null);  // ⚡ Axes du ring
     const boneAxesRef = useRef<THREE.Group | null>(null);
     const lastLogRef = useRef<number>(0);
+    const lastZFactorLogRef = useRef<number>(0);  // ⚡ Pour logs calibration Z
     const occludersRef = useRef<Map<string, THREE.Mesh>>(new Map());
     const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
     const cameraRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -389,14 +391,56 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             // ====== LOCAL SKELETON SPACE (the one that matches the video perfectly) ======
             const scaleX = skelAdj.scaleX ?? 1.0;
             const scaleY = skelAdj.scaleY ?? 1.0;
-            const zFactor = 1.5;
+
+            // ⚡ CALIBRATED Z FACTOR
+            // Récupérer les données de calibration
+            const calibration = useCalibrationStore.getState();
+            const { closeDistance, farDistance, skeletonScaleFactor, isCalibrated } = calibration;
+
+            // Calcul du zFactor calibré
+            // skeletonScaleFactor = ratio entre taille carte à 30cm / taille carte à 50cm
+            // Ce ratio représente le facteur de perspective de la caméra
+            let zFactor = 1.5; // Valeur par défaut si pas calibré
+
+            if (isCalibrated && closeDistance && farDistance && skeletonScaleFactor > 0) {
+                // Le skeletonScaleFactor est typiquement ~2.0 (objets 2x plus grands à 30cm qu'à 50cm)
+                // On l'utilise pour ajuster le zFactor à la perspective réelle de la caméra
+                // Formule: zFactor = skeletonScaleFactor * constante d'ajustement
+                const PERSPECTIVE_CONSTANT = 0.75; // Ajustable selon les résultats
+                zFactor = skeletonScaleFactor * PERSPECTIVE_CONSTANT;
+
+                // Log périodique (toutes les 2 secondes)
+                const now = Date.now();
+                if (!lastZFactorLogRef.current || now - lastZFactorLogRef.current > 2000) {
+                    lastZFactorLogRef.current = now;
+                    console.log('%c[Calibration Z] 📐 zFactor CALIBRÉ', 'color: #00FF00; font-weight: bold', {
+                        isCalibrated,
+                        closeCardPx: closeDistance.cardWidthPx,
+                        farCardPx: farDistance.cardWidthPx,
+                        skeletonScaleFactor: skeletonScaleFactor.toFixed(3),
+                        zFactor: zFactor.toFixed(3),
+                        formula: `${skeletonScaleFactor.toFixed(2)} × ${PERSPECTIVE_CONSTANT} = ${zFactor.toFixed(3)}`
+                    });
+                }
+            } else {
+                // Log si pas calibré
+                const now = Date.now();
+                if (!lastZFactorLogRef.current || now - lastZFactorLogRef.current > 5000) {
+                    lastZFactorLogRef.current = now;
+                    console.log('%c[Calibration Z] ⚠️ zFactor par DÉFAUT (pas calibré)', 'color: #FFAA00', {
+                        isCalibrated,
+                        zFactor: 1.5
+                    });
+                }
+            }
+
             const centerX = landmarks.reduce((s, l) => s + l.x, 0) / landmarks.length;
             const centerY = landmarks.reduce((s, l) => s + l.y, 0) / landmarks.length;
 
             const positions = landmarks.map((lm) => {
                 const scaledX = centerX + (lm.x - centerX) * scaleX + skelAdj.offsetX / width;
                 const scaledY = centerY + (lm.y - centerY) * scaleY + skelAdj.offsetY / height;
-                // âœ… Utiliser -lm.z immÃ©diatement pour Ãªtre dans le bon systÃ¨me de coordonnÃ©es visuel (+Z vers camÃ©ra)
+                // ✅ Utiliser -lm.z avec zFactor calibré pour matcher la perspective caméra
                 return new THREE.Vector3((scaledX - 0.5) * aspect, 0.5 - scaledY, -lm.z * zFactor);
             });
 
