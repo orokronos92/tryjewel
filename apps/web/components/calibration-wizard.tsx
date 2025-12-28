@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
     useCalibrationStore,
     CREDIT_CARD_WIDTH_MM,
@@ -10,8 +10,9 @@ import {
     ellipseCircumference,
     circumferenceToRingSizes,
 } from "@/stores/calibration-store";
+import { useEdgeTrackingStore } from "@/stores/edge-tracking-store";
 import { Button } from "@/components/ui/button";
-import { CreditCard, Hand, Check, X, ChevronRight } from "lucide-react";
+import { CreditCard, Hand, Check, X, ChevronRight, Loader2 } from "lucide-react";
 
 // Ratios anatomiques pour la largeur des doigts par rapport à la largeur de la paume
 const FINGER_WIDTH_RATIOS = {
@@ -25,9 +26,11 @@ const FINGER_WIDTH_RATIOS = {
 const FINGER_DEPTH_RATIO = 0.85;
 
 // Dimensions anatomiques moyennes d'une main adulte (en mm)
-// Main ≈ largeur carte bancaire (85.6mm)
-const HAND_WIDTH_MM = 85;   // Largeur main (paume + doigts serrés)
-const HAND_HEIGHT_MM = 160; // Hauteur main (poignet au bout du majeur)
+// Largeur paume (entre index MCP et pinky MCP) ≈ 85mm
+const PALM_WIDTH_MM = 85;
+
+// Tolérance pour la détection de distance (±15%)
+const DISTANCE_TOLERANCE = 0.15;
 
 // =============================================================================
 // TYPES
@@ -106,6 +109,16 @@ export function CalibrationWizard({
         completeCalibration,
     } = useCalibrationStore();
 
+    // Accès aux landmarks MediaPipe
+    const tracking = useEdgeTrackingStore((state) => state.tracking);
+    const landmarks = tracking.last_result?.hand_result?.landmarks;
+
+    // État pour la détection de main
+    const [detectedPalmWidthPx, setDetectedPalmWidthPx] = useState<number | null>(null);
+    const [isHandAtCorrectDistance, setIsHandAtCorrectDistance] = useState(false);
+    const [capturedLandmarks, setCapturedLandmarks] = useState<typeof landmarks | null>(null);
+    const [stabilityCounter, setStabilityCounter] = useState(0);
+
     // Fonction pour calculer les mesures d'un doigt
     const calculateFingerMeasurement = (
         fingerName: keyof typeof FINGER_WIDTH_RATIOS,
@@ -117,17 +130,13 @@ export function CalibrationWizard({
         const ringSizes = circumferenceToRingSizes(circumferenceMm);
 
         return {
-            widthPx: 0, // Non utilisé dans cette méthode
+            widthPx: 0,
             widthMm,
             depthMm,
             circumferenceMm,
             ringSizes,
         };
     };
-
-    // État local pour les sliders de main
-    const [handWidthSlider, setHandWidthSlider] = useState(50);
-    const [handHeightSlider, setHandHeightSlider] = useState(50);
 
     // ⚡ FIX: Toujours utiliser un index valide (0-3)
     // Si currentStep est 0 ou invalide, on force l'affichage de l'étape 1
@@ -145,49 +154,70 @@ export function CalibrationWizard({
         }
     }, [currentStep, setCurrentStep]);
 
-    // Récupérer la largeur de la carte pour cette distance (référence)
-    const currentCardWidthPx = step.distance === 'close'
-        ? closeDistance?.cardWidthPx
-        : farDistance?.cardWidthPx;
+    // Récupérer le pixelsPerMm de la carte pour cette distance
+    const currentPixelsPerMm = step.distance === 'close'
+        ? closeDistance?.pixelsPerMm
+        : farDistance?.pixelsPerMm;
 
-    // Conversion slider vers pixels pour la main
-    // Base : 90% de la largeur de la carte, ajustement ±25%
-    const getHandWidthPx = (val: number) => {
-        if (currentCardWidthPx) {
-            // Slider 50 = 90% de la carte
-            // ±25% = de 65% à 115%
-            const baseRatio = 0.9;
-            const adjustment = 0.25;
-            const minRatio = baseRatio - adjustment; // 0.65
-            const maxRatio = baseRatio + adjustment; // 1.15
-            const targetRatio = minRatio + (val / 100) * (maxRatio - minRatio);
-            return currentCardWidthPx * targetRatio;
+    // Taille attendue du cercle cible (paume à la bonne distance)
+    // Paume ≈ 85mm, donc cercle = 85mm × pixelsPerMm
+    const expectedPalmWidthPx = currentPixelsPerMm ? PALM_WIDTH_MM * currentPixelsPerMm : null;
+
+    // ==========================================================================
+    // DÉTECTION MEDIAPIPE - Calcul de la largeur de paume détectée
+    // ==========================================================================
+    useEffect(() => {
+        if (step.type !== 'hand' || !landmarks || landmarks.length < 21) {
+            setDetectedPalmWidthPx(null);
+            setIsHandAtCorrectDistance(false);
+            return;
         }
-        // Fallback
-        return containerWidth * 0.35;
-    };
 
-    const getHandHeightPx = (val: number) => {
-        if (currentCardWidthPx) {
-            // Hauteur main ≈ 180% largeur carte, ajustement ±25%
-            const baseRatio = 1.8;
-            const adjustment = 0.45; // 25% de 1.8
-            const minRatio = baseRatio - adjustment; // 1.35
-            const maxRatio = baseRatio + adjustment; // 2.25
-            const targetRatio = minRatio + (val / 100) * (maxRatio - minRatio);
-            return currentCardWidthPx * targetRatio;
+        // Largeur paume = distance entre index MCP (5) et pinky MCP (17)
+        // Les coordonnées sont normalisées (0-1), on les convertit en pixels
+        const indexMcp = landmarks[5];
+        const pinkyMcp = landmarks[17];
+
+        const dx = (indexMcp.x - pinkyMcp.x) * containerWidth;
+        const dy = (indexMcp.y - pinkyMcp.y) * containerHeight;
+        const palmWidth = Math.sqrt(dx * dx + dy * dy);
+
+        setDetectedPalmWidthPx(palmWidth);
+
+        // Vérifier si la main est à la bonne distance
+        if (expectedPalmWidthPx) {
+            const ratio = palmWidth / expectedPalmWidthPx;
+            const isCorrect = ratio >= (1 - DISTANCE_TOLERANCE) && ratio <= (1 + DISTANCE_TOLERANCE);
+
+            if (isCorrect) {
+                // Incrémenter le compteur de stabilité
+                setStabilityCounter(prev => Math.min(prev + 1, 30)); // Max 30 frames (~1 sec)
+            } else {
+                setStabilityCounter(0);
+            }
+
+            // Valider après 15 frames stables (~0.5 sec)
+            setIsHandAtCorrectDistance(stabilityCounter >= 15);
+
+            // Capturer les landmarks quand stable
+            if (stabilityCounter >= 15 && !capturedLandmarks) {
+                setCapturedLandmarks([...landmarks]);
+                console.log('[Calibration] ✅ Main capturée à la bonne distance!', {
+                    detectedPx: palmWidth.toFixed(1),
+                    expectedPx: expectedPalmWidthPx.toFixed(1),
+                    ratio: ratio.toFixed(3),
+                });
+            }
         }
-        // Fallback
-        return containerHeight * 0.5;
-    };
+    }, [landmarks, step.type, expectedPalmWidthPx, containerWidth, containerHeight, stabilityCounter, capturedLandmarks]);
 
-    // Calculer les dimensions avec clamp pour rester visible
-    // Garder une marge de 20% pour les contrôles
-    const maxWidth = containerWidth * 0.8;
-    const maxHeight = containerHeight * 0.6; // Laisser place aux sliders en bas
-
-    const handWidthPx = Math.min(getHandWidthPx(handWidthSlider), maxWidth);
-    const handHeightPx = Math.min(getHandHeightPx(handHeightSlider), maxHeight);
+    // Reset quand on change d'étape
+    useEffect(() => {
+        setDetectedPalmWidthPx(null);
+        setIsHandAtCorrectDistance(false);
+        setCapturedLandmarks(null);
+        setStabilityCounter(0);
+    }, [currentStep]);
 
     // Confirmer l'étape actuelle
     const handleConfirm = () => {
@@ -200,24 +230,33 @@ export function CalibrationWizard({
                 setFarCardCalibration(fixedCardWidth);
             }
         } else {
-            // Récupérer le pixelsPerMm de la carte pour cette distance
-            const calibrationData = step.distance === 'close' ? closeDistance : farDistance;
-            const pixelsPerMm = calibrationData?.pixelsPerMm || 1;
+            // Utiliser les landmarks capturés par MediaPipe
+            if (!capturedLandmarks || !detectedPalmWidthPx || !currentPixelsPerMm) {
+                console.warn('[Calibration] ⚠️ Pas de landmarks capturés');
+                return;
+            }
 
-            // Calculer la largeur de la paume en mm
-            // La largeur du contour SVG représente la largeur de la main
-            // On estime que la paume fait ~60% de la largeur totale de la main
-            const palmWidthMm = (handWidthPx / pixelsPerMm) * 0.6;
+            // La largeur de paume détectée par MediaPipe, convertie en mm
+            const palmWidthMm = detectedPalmWidthPx / currentPixelsPerMm;
 
-            console.log('[Calibration] 📏 Calcul des tailles:', {
-                handWidthPx,
-                pixelsPerMm,
-                palmWidthMm,
+            // Calculer la hauteur de main approximative
+            const wrist = capturedLandmarks[0];
+            const middleTip = capturedLandmarks[12];
+            const handHeightPx = Math.sqrt(
+                Math.pow((middleTip.x - wrist.x) * containerWidth, 2) +
+                Math.pow((middleTip.y - wrist.y) * containerHeight, 2)
+            );
+
+            console.log('[Calibration] 📏 MediaPipe - Mesures:', {
+                palmWidthPx: detectedPalmWidthPx.toFixed(1),
+                palmWidthMm: palmWidthMm.toFixed(1),
+                handHeightPx: handHeightPx.toFixed(1),
+                pixelsPerMm: currentPixelsPerMm.toFixed(3),
             });
 
-            // Calculer les mesures de chaque doigt
+            // Calculer les mesures de chaque doigt basées sur la paume réelle
             const handMeasurements: HandMeasurements = {
-                handWidthPx,
+                handWidthPx: detectedPalmWidthPx,
                 handHeightPx,
                 index: calculateFingerMeasurement('index', palmWidthMm),
                 middle: calculateFingerMeasurement('middle', palmWidthMm),
@@ -225,7 +264,7 @@ export function CalibrationWizard({
                 pinky: calculateFingerMeasurement('pinky', palmWidthMm),
             };
 
-            console.log('[Calibration] 💍 Tailles calculées:', {
+            console.log('[Calibration] 💍 Tailles bagues calculées:', {
                 index: handMeasurements.index?.ringSizes.eu,
                 middle: handMeasurements.middle?.ringSizes.eu,
                 ring: handMeasurements.ring?.ringSizes.eu,
@@ -242,9 +281,6 @@ export function CalibrationWizard({
         // Passer à l'étape suivante ou terminer
         if (currentStep < 4) {
             setCurrentStep(currentStep + 1);
-            // Reset sliders pour la prochaine étape main
-            setHandWidthSlider(50);
-            setHandHeightSlider(50);
         } else {
             completeCalibration();
             onClose();
@@ -330,90 +366,113 @@ export function CalibrationWizard({
             );
         }
 
-        // Type = hand - Contour de MAIN ajustable (vraie silhouette)
+        // Type = hand - Cercle cible + détection MediaPipe
+        const circleSize = expectedPalmWidthPx || containerWidth * 0.35;
+        const isDetecting = !!landmarks && landmarks.length >= 21;
+        const matchRatio = detectedPalmWidthPx && expectedPalmWidthPx
+            ? detectedPalmWidthPx / expectedPalmWidthPx
+            : null;
+
+        // Couleur du cercle selon l'état
+        const getCircleColor = () => {
+            if (isHandAtCorrectDistance) return 'rgb(34, 197, 94)'; // green-500
+            if (matchRatio && matchRatio >= 0.85 && matchRatio <= 1.15) return 'rgb(234, 179, 8)'; // yellow-500
+            return 'rgb(59, 130, 246)'; // blue-500
+        };
+
         return (
             <div className="relative w-full h-full flex flex-col">
-                {/* Zone centrale - contour de main avec dimensions FIXES (pas flex) */}
+                {/* Zone centrale - cercle cible */}
                 <div className="flex-1 flex items-center justify-center relative overflow-hidden">
-                    {/* Conteneur à taille fixe pour le SVG */}
+                    {/* Cercle cible */}
                     <div
+                        className="rounded-full border-4 transition-all duration-300 flex items-center justify-center"
                         style={{
-                            width: handWidthPx,
-                            height: handHeightPx,
-                            transition: 'width 0.1s, height 0.1s'
+                            width: circleSize,
+                            height: circleSize,
+                            borderColor: getCircleColor(),
+                            backgroundColor: isHandAtCorrectDistance
+                                ? 'rgba(34, 197, 94, 0.2)'
+                                : 'rgba(59, 130, 246, 0.1)',
+                            boxShadow: isHandAtCorrectDistance
+                                ? '0 0 40px rgba(34, 197, 94, 0.5)'
+                                : '0 0 20px rgba(59, 130, 246, 0.3)',
                         }}
-                        className="relative"
                     >
-                        {/* SVG externe de main réaliste */}
-                        <img
-                            src="/assets/hand-outline.svg"
-                            alt="Contour de main"
-                            style={{
-                                width: '100%',
-                                height: '100%',
-                                objectFit: 'fill'
-                            }}
-                        />
+                        {/* Icône au centre */}
+                        {!isDetecting ? (
+                            <div className="text-center">
+                                <Hand className="w-16 h-16 text-gray-400 mx-auto mb-2" />
+                                <p className="text-gray-400 text-sm">Montrez votre main</p>
+                            </div>
+                        ) : isHandAtCorrectDistance ? (
+                            <div className="text-center">
+                                <Check className="w-20 h-20 text-green-500 mx-auto" />
+                            </div>
+                        ) : (
+                            <div className="text-center">
+                                <Loader2 className="w-12 h-12 text-yellow-500 mx-auto animate-spin" />
+                                <p className="text-yellow-400 text-sm mt-2">
+                                    {matchRatio && matchRatio < 0.85 ? 'Rapprochez-vous' :
+                                     matchRatio && matchRatio > 1.15 ? 'Éloignez-vous' :
+                                     'Ajustez la distance'}
+                                </p>
+                            </div>
+                        )}
                     </div>
 
-                    {/* Labels dimensions en mm */}
-                    {(() => {
-                        const ppm = step.distance === 'close' ? closeDistance?.pixelsPerMm : farDistance?.pixelsPerMm;
-                        if (!ppm) return null;
-                        return (
-                            <>
-                                <div className="absolute top-1/2 right-4 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
-                                    {Math.round(handHeightPx / ppm)} mm
+                    {/* Indicateur de taille détectée */}
+                    {isDetecting && detectedPalmWidthPx && expectedPalmWidthPx && (
+                        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/80 px-4 py-2 rounded-lg">
+                            <div className="text-sm font-mono">
+                                <span className="text-gray-400">Détecté: </span>
+                                <span className={matchRatio && matchRatio >= 0.85 && matchRatio <= 1.15 ? 'text-green-400' : 'text-yellow-400'}>
+                                    {detectedPalmWidthPx.toFixed(0)}px
+                                </span>
+                                <span className="text-gray-500 mx-2">/</span>
+                                <span className="text-gray-400">Cible: </span>
+                                <span className="text-blue-400">{expectedPalmWidthPx.toFixed(0)}px</span>
+                            </div>
+                            {matchRatio && (
+                                <div className="text-xs text-center mt-1">
+                                    <span className={matchRatio >= 0.85 && matchRatio <= 1.15 ? 'text-green-400' : 'text-yellow-400'}>
+                                        {(matchRatio * 100).toFixed(0)}%
+                                    </span>
+                                    <span className="text-gray-500"> (cible: 85-115%)</span>
                                 </div>
-                                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
-                                    {Math.round(handWidthPx / ppm)} mm
-                                </div>
-                            </>
-                        );
-                    })()}
+                            )}
+                        </div>
+                    )}
+
+                    {/* Barre de progression de stabilité */}
+                    {isDetecting && matchRatio && matchRatio >= 0.85 && matchRatio <= 1.15 && (
+                        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-48">
+                            <div className="bg-gray-700 rounded-full h-2 overflow-hidden">
+                                <div
+                                    className="bg-green-500 h-full transition-all duration-100"
+                                    style={{ width: `${(stabilityCounter / 15) * 100}%` }}
+                                />
+                            </div>
+                            <p className="text-xs text-center text-gray-400 mt-1">
+                                {stabilityCounter < 15 ? 'Maintenez la position...' : 'Capturé!'}
+                            </p>
+                        </div>
+                    )}
                 </div>
 
-                {/* Sliders en bas */}
-                <div className="bg-black/70 p-4 rounded-t-lg space-y-3">
-                    <p className="text-center text-gray-300 text-sm mb-2">
-                        Ajustez le contour pour qu'il corresponde à votre main
+                {/* Instructions en bas */}
+                <div className="bg-black/70 p-4 rounded-t-lg">
+                    <p className="text-center text-gray-300">
+                        {step.distance === 'close'
+                            ? "Placez votre paume ouverte à ~20cm pour qu'elle remplisse le cercle"
+                            : "Reculez à ~40cm pour que votre paume remplisse le cercle"
+                        }
                     </p>
-
-                    {/* Slider Largeur */}
-                    <div className="max-w-md mx-auto space-y-1">
-                        <div className="flex justify-between text-xs text-gray-300">
-                            <span>Fine</span>
-                            <span className="text-green-400 font-mono">Largeur: {Math.round(handWidthPx)}px</span>
-                            <span>Épaisse</span>
-                        </div>
-                        <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            step="1"
-                            value={handWidthSlider}
-                            onChange={(e) => setHandWidthSlider(Number(e.target.value))}
-                            className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
-                        />
-                    </div>
-
-                    {/* Slider Hauteur */}
-                    <div className="max-w-md mx-auto space-y-1">
-                        <div className="flex justify-between text-xs text-gray-300">
-                            <span>Courte</span>
-                            <span className="text-green-400 font-mono">Hauteur: {Math.round(handHeightPx)}px</span>
-                            <span>Longue</span>
-                        </div>
-                        <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            step="1"
-                            value={handHeightSlider}
-                            onChange={(e) => setHandHeightSlider(Number(e.target.value))}
-                            className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
-                        />
-                    </div>
+                    {currentPixelsPerMm && (
+                        <p className="text-center text-xs text-gray-500 mt-1">
+                            Cercle = {PALM_WIDTH_MM}mm × {currentPixelsPerMm.toFixed(2)} px/mm = {circleSize.toFixed(0)}px
+                        </p>
+                    )}
                 </div>
             </div>
         );
@@ -469,10 +528,24 @@ export function CalibrationWizard({
                 {/* Bouton confirmer */}
                 <Button
                     onClick={handleConfirm}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white py-5 text-lg"
+                    disabled={step.type === 'hand' && !isHandAtCorrectDistance}
+                    className={`w-full py-5 text-lg ${
+                        step.type === 'hand' && !isHandAtCorrectDistance
+                            ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                            : 'bg-green-600 hover:bg-green-700 text-white'
+                    }`}
                 >
-                    Confirmer
-                    <ChevronRight className="ml-2 h-5 w-5" />
+                    {step.type === 'hand' && !isHandAtCorrectDistance ? (
+                        <>
+                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                            En attente de détection...
+                        </>
+                    ) : (
+                        <>
+                            Confirmer
+                            <ChevronRight className="ml-2 h-5 w-5" />
+                        </>
+                    )}
                 </Button>
             </div>
         </div>
