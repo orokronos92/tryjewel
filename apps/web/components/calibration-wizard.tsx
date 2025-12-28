@@ -12,7 +12,6 @@ import {
 } from "@/stores/calibration-store";
 import { Button } from "@/components/ui/button";
 import { CreditCard, Hand, Check, X, ChevronRight } from "lucide-react";
-import HandCalibrationFrame from "@/components/hand-calibration-frame";
 
 // Ratios anatomiques pour la largeur des doigts par rapport à la largeur de la paume
 const FINGER_WIDTH_RATIOS = {
@@ -308,43 +307,88 @@ export function CalibrationWizard({
             );
         }
 
-        // Type = hand - Contour de MAIN ajustable
-        // SVG fait 200x280, scaleX et scaleY INDÉPENDANTS
-        const svgOriginalWidth = 200;
-        const svgOriginalHeight = 280;
-        const scaleX = handWidthPx / svgOriginalWidth;
-        const scaleY = handHeightPx / svgOriginalHeight;
-
+        // Type = hand - Contour de MAIN ajustable (vraie silhouette)
         return (
             <div className="relative w-full h-full flex flex-col">
-                {/* Zone centrale - contour de main */}
-                <div className="flex-1 flex items-center justify-center relative">
-                    <HandCalibrationFrame
-                        width={containerWidth}
-                        height={containerHeight - 120}
-                        scaleX={scaleX}
-                        scaleY={scaleY}
-                        stroke="#22c55e"
-                        strokeWidth={3}
-                        opacity={1}
-                    />
+                {/* Zone centrale - contour de main avec dimensions FIXES (pas flex) */}
+                <div className="flex-1 flex items-center justify-center relative overflow-hidden">
+                    {/* Conteneur à taille fixe pour le SVG */}
+                    <div
+                        style={{
+                            width: handWidthPx,
+                            height: handHeightPx,
+                            transition: 'width 0.1s, height 0.1s'
+                        }}
+                        className="relative"
+                    >
+                        {/* SVG silhouette de main - 5 doigts */}
+                        <svg
+                            width="100%"
+                            height="100%"
+                            viewBox="0 0 100 140"
+                            preserveAspectRatio="none"
+                            className="overflow-visible"
+                        >
+                            {/* Paume */}
+                            <rect x="20" y="55" width="60" height="70" rx="10"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Index */}
+                            <rect x="25" y="10" width="12" height="50" rx="6"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Majeur */}
+                            <rect x="40" y="5" width="12" height="55" rx="6"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Annulaire */}
+                            <rect x="55" y="10" width="12" height="50" rx="6"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Auriculaire */}
+                            <rect x="70" y="20" width="10" height="40" rx="5"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Pouce */}
+                            <ellipse cx="10" cy="75" rx="12" ry="25" transform="rotate(-20, 10, 75)"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+
+                            {/* Poignet */}
+                            <rect x="30" y="120" width="40" height="20" rx="5"
+                                fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="2"/>
+                        </svg>
+                    </div>
+
+                    {/* Labels dimensions en mm */}
+                    {(() => {
+                        const ppm = step.distance === 'close' ? closeDistance?.pixelsPerMm : farDistance?.pixelsPerMm;
+                        if (!ppm) return null;
+                        return (
+                            <>
+                                <div className="absolute top-1/2 right-4 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                                    {Math.round(handHeightPx / ppm)} mm
+                                </div>
+                                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-green-400">
+                                    {Math.round(handWidthPx / ppm)} mm
+                                </div>
+                            </>
+                        );
+                    })()}
                 </div>
 
-                {/* Infos dimensions */}
-                <div className="text-center text-green-400 font-mono text-sm py-1">
-                    Largeur: {Math.round(handWidthPx)}px · Hauteur: {Math.round(handHeightPx)}px
-                </div>
+                {/* Sliders en bas */}
+                <div className="bg-black/70 p-4 rounded-t-lg space-y-3">
+                    <p className="text-center text-gray-300 text-sm mb-2">
+                        Ajustez le contour pour qu'il corresponde à votre main
+                    </p>
 
-                {/* Instructions */}
-                <div className="text-center text-gray-300 text-xs py-1">
-                    Ajustez le contour pour qu'il épouse votre main
-                </div>
-
-                {/* Sliders en bas - HORIZONTAL comme avant */}
-                <div className="bg-black/50 p-3 space-y-2">
                     {/* Slider Largeur */}
-                    <div className="flex items-center gap-3">
-                        <span className="text-white/60 text-xs w-12">Étroit</span>
+                    <div className="max-w-md mx-auto space-y-1">
+                        <div className="flex justify-between text-xs text-gray-300">
+                            <span>Fine</span>
+                            <span className="text-green-400 font-mono">Largeur: {Math.round(handWidthPx)}px</span>
+                            <span>Épaisse</span>
+                        </div>
                         <input
                             type="range"
                             min="0"
@@ -352,14 +396,17 @@ export function CalibrationWizard({
                             step="1"
                             value={handWidthSlider}
                             onChange={(e) => setHandWidthSlider(Number(e.target.value))}
-                            className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
+                            className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
                         />
-                        <span className="text-white/60 text-xs w-12 text-right">Large</span>
                     </div>
 
                     {/* Slider Hauteur */}
-                    <div className="flex items-center gap-3">
-                        <span className="text-white/60 text-xs w-12">Court</span>
+                    <div className="max-w-md mx-auto space-y-1">
+                        <div className="flex justify-between text-xs text-gray-300">
+                            <span>Courte</span>
+                            <span className="text-green-400 font-mono">Hauteur: {Math.round(handHeightPx)}px</span>
+                            <span>Longue</span>
+                        </div>
                         <input
                             type="range"
                             min="0"
@@ -367,9 +414,8 @@ export function CalibrationWizard({
                             step="1"
                             value={handHeightSlider}
                             onChange={(e) => setHandHeightSlider(Number(e.target.value))}
-                            className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
+                            className="w-full h-3 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-green-500"
                         />
-                        <span className="text-white/60 text-xs w-12 text-right">Grand</span>
                     </div>
                 </div>
             </div>
