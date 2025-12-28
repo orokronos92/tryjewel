@@ -145,22 +145,21 @@ export function CalibrationWizard({
         }
     }, [currentStep, setCurrentStep]);
 
-    // Récupérer le pixelsPerMm de la carte pour cette distance
-    const currentPixelsPerMm = step.distance === 'close'
-        ? closeDistance?.pixelsPerMm
-        : farDistance?.pixelsPerMm;
+    // Récupérer la largeur de la carte pour cette distance (référence)
+    const currentCardWidthPx = step.distance === 'close'
+        ? closeDistance?.cardWidthPx
+        : farDistance?.cardWidthPx;
 
     // Conversion slider vers pixels pour la main
-    // Utilise pixelsPerMm si disponible, sinon fallback sur pourcentages du container
+    // Base : 90% de la largeur de la carte (main ≈ carte)
     const getHandWidthPx = (val: number) => {
-        if (currentPixelsPerMm) {
-            // Taille basée sur dimensions anatomiques réelles
-            // Slider 50 = taille moyenne (HAND_WIDTH_MM)
-            // Slider permet ±30% d'ajustement
-            const minMm = HAND_WIDTH_MM * 0.7;  // 70% de la moyenne
-            const maxMm = HAND_WIDTH_MM * 1.3;  // 130% de la moyenne
-            const targetMm = minMm + (val / 100) * (maxMm - minMm);
-            return targetMm * currentPixelsPerMm;
+        if (currentCardWidthPx) {
+            // Slider 50 = 90% de la carte
+            // Slider permet ajustement de 60% à 120% de la carte
+            const minRatio = 0.6;
+            const maxRatio = 1.2;
+            const targetRatio = minRatio + (val / 100) * (maxRatio - minRatio);
+            return currentCardWidthPx * targetRatio;
         }
         // Fallback si pas de calibration carte
         const baseMin = containerWidth * 0.15;
@@ -169,12 +168,13 @@ export function CalibrationWizard({
     };
 
     const getHandHeightPx = (val: number) => {
-        if (currentPixelsPerMm) {
-            // Taille basée sur dimensions anatomiques réelles
-            const minMm = HAND_HEIGHT_MM * 0.7;
-            const maxMm = HAND_HEIGHT_MM * 1.3;
-            const targetMm = minMm + (val / 100) * (maxMm - minMm);
-            return targetMm * currentPixelsPerMm;
+        if (currentCardWidthPx) {
+            // Hauteur main ≈ 2x largeur carte (ratio anatomique ~1.8-2.0)
+            // Slider 50 = 180% de la carte en hauteur
+            const minRatio = 1.2;
+            const maxRatio = 2.4;
+            const targetRatio = minRatio + (val / 100) * (maxRatio - minRatio);
+            return currentCardWidthPx * targetRatio;
         }
         // Fallback si pas de calibration carte
         const baseMin = containerHeight * 0.25;
