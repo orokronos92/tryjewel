@@ -309,10 +309,9 @@ export function CalibrationWizard({
         }
 
         // Type = hand - Contour de MAIN ajustable (vraie silhouette SVG)
-        // Calculer le scale basé sur la taille souhaitée
-        // Le SVG original fait 678x501, on veut le scaler pour que la largeur = handWidthPx
-        const svgOriginalWidth = 678;
-        const svgOriginalHeight = 501;
+        // Le SVG fait 200x280, on scale pour que la largeur = handWidthPx
+        const svgOriginalWidth = 200;
+        const svgOriginalHeight = 280;
         const handScale = handWidthPx / svgOriginalWidth;
         const scaledHeight = svgOriginalHeight * handScale;
 
