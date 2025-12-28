@@ -45,10 +45,11 @@ export default function HandCalibrationFrame({
 
   return (
     <svg
-      className="absolute inset-0 pointer-events-none"
+      className="absolute inset-0 pointer-events-none overflow-visible"
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      overflow="visible"
     >
       <g transform={transform}>
         {/* Main hand outline - 5 fingers with proper proportions */}
