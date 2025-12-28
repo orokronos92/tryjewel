@@ -25,8 +25,9 @@ const FINGER_WIDTH_RATIOS = {
 const FINGER_DEPTH_RATIO = 0.85;
 
 // Dimensions anatomiques moyennes d'une main adulte (en mm)
-const HAND_WIDTH_MM = 95;   // Largeur main (doigts écartés)
-const HAND_HEIGHT_MM = 180; // Hauteur main (poignet au bout du majeur)
+// Main ≈ largeur carte bancaire (85.6mm)
+const HAND_WIDTH_MM = 85;   // Largeur main (paume + doigts serrés)
+const HAND_HEIGHT_MM = 160; // Hauteur main (poignet au bout du majeur)
 
 // =============================================================================
 // TYPES
