@@ -321,68 +321,16 @@ export function CalibrationWizard({
                         }}
                         className="relative"
                     >
-                        {/* SVG silhouette de main réaliste - 5 doigts */}
-                        <svg
-                            width="100%"
-                            height="100%"
-                            viewBox="0 0 120 160"
-                            preserveAspectRatio="none"
-                            className="overflow-visible"
-                        >
-                            {/* Main complète - un seul path réaliste */}
-                            <path
-                                fill="rgba(34, 197, 94, 0.25)"
-                                stroke="#22c55e"
-                                strokeWidth="2.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="
-                                    M 45 155
-                                    L 45 130
-                                    Q 20 125, 12 100
-                                    Q 5 75, 8 55
-                                    L 12 35
-                                    Q 14 25, 20 22
-                                    Q 28 18, 32 28
-                                    L 35 50
-                                    L 35 30
-                                    L 32 12
-                                    Q 32 4, 40 2
-                                    Q 48 0, 52 4
-                                    Q 56 8, 55 16
-                                    L 52 35
-                                    L 55 18
-                                    L 57 6
-                                    Q 58 0, 65 0
-                                    Q 72 0, 75 4
-                                    Q 78 8, 76 18
-                                    L 72 40
-                                    L 76 22
-                                    Q 78 12, 85 12
-                                    Q 92 12, 95 18
-                                    Q 98 24, 95 35
-                                    L 88 55
-                                    L 92 40
-                                    Q 95 30, 102 32
-                                    Q 109 34, 110 42
-                                    Q 112 50, 108 62
-                                    L 100 85
-                                    Q 105 100, 102 120
-                                    Q 98 140, 75 148
-                                    L 75 155
-                                    Z
-                                "
-                            />
-                            {/* Ligne poignet en pointillés */}
-                            <line
-                                x1="45" y1="140"
-                                x2="75" y2="140"
-                                stroke="#22c55e"
-                                strokeWidth="1.5"
-                                strokeDasharray="4 3"
-                                opacity="0.6"
-                            />
-                        </svg>
+                        {/* SVG externe de main réaliste */}
+                        <img
+                            src="/assets/hand-outline.svg"
+                            alt="Contour de main"
+                            style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'fill'
+                            }}
+                        />
                     </div>
 
                     {/* Labels dimensions en mm */}
