@@ -178,9 +178,27 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
           console.log(`[OpenCV] Polling attempt ${attempts}:`, {
             cvExists: !!cv,
             cvType: typeof cv,
-            cvKeys: cv ? Object.keys(cv).slice(0, 10) : [],
+            cvKeys: cv ? Object.keys(cv) : [],
             hasMat: cv && !!cv.Mat,
+            hasThen: cv && typeof cv.then === 'function',
+            hasReady: cv && typeof cv.ready === 'object',
           });
+        }
+
+        // Check if cv is a Promise (newer OpenCV.js pattern)
+        if (cv && typeof cv.then === 'function' && !cvInstance) {
+          console.log('[OpenCV] cv is a Promise, awaiting...');
+          cv.then((readyCv: OpenCVModule) => {
+            clearTimeout(timeoutId);
+            const loadTime = (performance.now() - startTime).toFixed(0);
+            console.log(`[OpenCV] ✅ Ready via Promise in ${loadTime}ms`);
+            cvInstance = readyCv;
+            (window as any).cv = readyCv;
+            resolve(cvInstance);
+          }).catch((err: Error) => {
+            console.error('[OpenCV] Promise rejected:', err);
+          });
+          return; // Stop polling
         }
 
         if (cv && cv.Mat) {
