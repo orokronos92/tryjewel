@@ -530,13 +530,19 @@ interface RectangleCandidate {
     score: number;
 }
 
+interface FindRectanglesResult {
+    best: RectangleCandidate | null;
+    allQuads: RectangleCandidate[];  // All quadrilaterals found (before filtering)
+}
+
 function findRectanglesFromContours(
     contours: Contour[],
     width: number,
     height: number,
     expectedWidth: number,
     expectedHeight: number
-): RectangleCandidate | null {
+): FindRectanglesResult {
+    const allQuads: RectangleCandidate[] = [];  // All quads for debug visualization
     const candidates: RectangleCandidate[] = [];
     const centerX = width / 2;
     const centerY = height / 2;
@@ -564,7 +570,7 @@ function findRectanglesFromContours(
         if (approx.length !== 4 && approx.length !== 5) continue;
 
         // Use first 4 points if we got 5 (closed polygon)
-        const pts = approx.slice(0, 4);
+        const pts = approx.slice(0, 4) as [number, number][];
 
         // Get bounding rect
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -578,6 +584,9 @@ function findRectanglesFromContours(
         const rectW = maxX - minX;
         const rectH = maxY - minY;
 
+        // Add to allQuads for visualization (before filtering)
+        allQuads.push({ x: minX, y: minY, w: rectW, h: rectH, points: pts, score: 0 });
+
         // IMPORTANT: Skip rectangles too close to the crop boundary (likely the boundary itself!)
         if (minX < boundaryMargin || minY < boundaryMargin ||
             maxX > width - boundaryMargin || maxY > height - boundaryMargin) {
@@ -585,13 +594,13 @@ function findRectanglesFromContours(
         }
 
         // Skip if too small or too large
-        if (rectW < expectedWidth * 0.5 || rectW > expectedWidth * 1.5) continue;
-        if (rectH < expectedHeight * 0.5 || rectH > expectedHeight * 1.5) continue;
+        if (rectW < expectedWidth * 0.4 || rectW > expectedWidth * 1.6) continue;
+        if (rectH < expectedHeight * 0.4 || rectH > expectedHeight * 1.6) continue;
 
-        // Check aspect ratio
+        // Check aspect ratio (relaxed)
         const aspectRatio = rectW / rectH;
         const ratioMatch = aspectRatio / CREDIT_CARD_ASPECT_RATIO;
-        if (ratioMatch < (1 - ASPECT_RATIO_TOLERANCE) || ratioMatch > (1 + ASPECT_RATIO_TOLERANCE)) continue;
+        if (ratioMatch < 0.6 || ratioMatch > 1.6) continue;
 
         // Calculate scores
         const rectCenterX = minX + rectW / 2;
@@ -616,7 +625,9 @@ function findRectanglesFromContours(
         });
     }
 
-    if (candidates.length === 0) return null;
+    console.log('[CardDetection] 🔍 Quads found:', allQuads.length, 'Valid candidates:', candidates.length);
+
+    if (candidates.length === 0) return { best: null, allQuads };
 
     candidates.sort((a, b) => b.score - a.score);
     const best = candidates[0];
@@ -626,10 +637,9 @@ function findRectanglesFromContours(
         size: `${best.w.toFixed(0)}x${best.h.toFixed(0)}`,
         aspect: (best.w / best.h).toFixed(2),
         score: best.score.toFixed(2),
-        candidates: candidates.length,
     });
 
-    return best;
+    return { best, allQuads };
 }
 
 // =============================================================================
@@ -643,7 +653,8 @@ function drawDebugVisualization(
     cropHeight: number,
     rect: RectangleCandidate | null,
     canvasDisplayWidth: number,
-    canvasDisplayHeight: number
+    canvasDisplayHeight: number,
+    allQuads: RectangleCandidate[] = []  // All quadrilaterals found (for debug)
 ): void {
     const ctx = debugCanvas.getContext('2d');
     if (!ctx) return;
@@ -655,7 +666,7 @@ function drawDebugVisualization(
     const scaleX = canvasDisplayWidth / cropWidth;
     const scaleY = canvasDisplayHeight / cropHeight;
 
-    // Draw edges in green
+    // Draw edges in green (dimmer)
     const edgeImageData = ctx.createImageData(canvasDisplayWidth, canvasDisplayHeight);
     for (let y = 0; y < cropHeight; y++) {
         for (let x = 0; x < cropWidth; x++) {
@@ -665,18 +676,32 @@ function drawDebugVisualization(
                 if (cx >= 0 && cx < canvasDisplayWidth && cy >= 0 && cy < canvasDisplayHeight) {
                     const idx = (cy * canvasDisplayWidth + cx) * 4;
                     edgeImageData.data[idx] = 0;
-                    edgeImageData.data[idx + 1] = 255;
+                    edgeImageData.data[idx + 1] = 200;
                     edgeImageData.data[idx + 2] = 0;
-                    edgeImageData.data[idx + 3] = 200;
+                    edgeImageData.data[idx + 3] = 150;
                 }
             }
         }
     }
     ctx.putImageData(edgeImageData, 0, 0);
 
-    // Draw detected rectangle
+    // Draw ALL quadrilaterals found (in orange, thin)
+    for (const quad of allQuads) {
+        if (quad.points && quad.points.length >= 4) {
+            ctx.strokeStyle = 'orange';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(quad.points[0][0] * scaleX, quad.points[0][1] * scaleY);
+            for (let i = 1; i < quad.points.length; i++) {
+                ctx.lineTo(quad.points[i][0] * scaleX, quad.points[i][1] * scaleY);
+            }
+            ctx.closePath();
+            ctx.stroke();
+        }
+    }
+
+    // Draw BEST detected rectangle in RED (thick)
     if (rect) {
-        // Draw polygon outline in red
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -691,7 +716,7 @@ function drawDebugVisualization(
         }
         ctx.stroke();
 
-        // Draw corner points
+        // Draw corner points in yellow
         ctx.fillStyle = 'yellow';
         if (rect.points) {
             for (const p of rect.points) {
@@ -713,7 +738,7 @@ function drawDebugVisualization(
         ctx.stroke();
     }
 
-    // Draw border
+    // Draw border cyan
     ctx.strokeStyle = 'cyan';
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, canvasDisplayWidth - 2, canvasDisplayHeight - 2);
@@ -727,6 +752,7 @@ interface DetectionResult {
     card: DetectedCard | null;
     edges: Uint8Array;
     rect: RectangleCandidate | null;
+    allQuads: RectangleCandidate[];
     cropWidth: number;
     cropHeight: number;
 }
@@ -768,10 +794,10 @@ function detectCardInCropRegion(
         'Expected size:', `${expectedWidthInCrop.toFixed(0)}x${expectedHeightInCrop.toFixed(0)}`);
 
     // Step 3: Find rectangles from contours
-    const rect = findRectanglesFromContours(contours, width, height, expectedWidthInCrop, expectedHeightInCrop);
+    const { best: rect, allQuads } = findRectanglesFromContours(contours, width, height, expectedWidthInCrop, expectedHeightInCrop);
 
     if (!rect) {
-        return { ...baseResult, card: null, rect: null };
+        return { ...baseResult, card: null, rect: null, allQuads };
     }
 
     // Check alignment
@@ -822,7 +848,7 @@ function detectCardInCropRegion(
         isAligned,
     };
 
-    return { ...baseResult, card, rect };
+    return { ...baseResult, card, rect, allQuads };
 }
 
 // =============================================================================
@@ -888,7 +914,7 @@ export function useCardDetection({
             const canvasDisplayHeight = expectedFrameHeight * 1.4;
             drawDebugVisualization(
                 debugCanvasRef.current, result.edges, result.cropWidth, result.cropHeight,
-                result.rect, canvasDisplayWidth, canvasDisplayHeight
+                result.rect, canvasDisplayWidth, canvasDisplayHeight, result.allQuads
             );
         }
 
