@@ -448,12 +448,14 @@ function houghLines(
 }
 
 // Find the best rectangle from Hough lines - matching expected size
+// Now also checks edge coverage to ensure rectangle aligns with actual edges
 function findRectangle(
     lines: HoughLine[],
     width: number,
     height: number,
     expectedWidth: number,
-    expectedHeight: number
+    expectedHeight: number,
+    edges: Uint8Array  // Add edges array to check coverage
 ): { x: number; y: number; w: number; h: number } | null {
     // Separate horizontal and vertical lines
     const horizontals = lines.filter(l => l.isHorizontal).slice(0, 20);
@@ -467,6 +469,63 @@ function findRectangle(
     const centerX = width / 2;
     const centerY = height / 2;
 
+    // Helper function to calculate edge coverage for a rectangle
+    const calculateEdgeCoverage = (x: number, y: number, w: number, h: number): number => {
+        let edgePixels = 0;
+        let totalPixels = 0;
+        const tolerance = 3; // pixels tolerance for edge detection
+
+        // Check top edge
+        for (let px = Math.max(0, Math.floor(x)); px < Math.min(width, Math.ceil(x + w)); px++) {
+            for (let dy = -tolerance; dy <= tolerance; dy++) {
+                const py = Math.floor(y) + dy;
+                if (py >= 0 && py < height && edges[py * width + px] === 255) {
+                    edgePixels++;
+                    break;
+                }
+            }
+            totalPixels++;
+        }
+
+        // Check bottom edge
+        for (let px = Math.max(0, Math.floor(x)); px < Math.min(width, Math.ceil(x + w)); px++) {
+            for (let dy = -tolerance; dy <= tolerance; dy++) {
+                const py = Math.floor(y + h) + dy;
+                if (py >= 0 && py < height && edges[py * width + px] === 255) {
+                    edgePixels++;
+                    break;
+                }
+            }
+            totalPixels++;
+        }
+
+        // Check left edge
+        for (let py = Math.max(0, Math.floor(y)); py < Math.min(height, Math.ceil(y + h)); py++) {
+            for (let dx = -tolerance; dx <= tolerance; dx++) {
+                const px = Math.floor(x) + dx;
+                if (px >= 0 && px < width && edges[py * width + px] === 255) {
+                    edgePixels++;
+                    break;
+                }
+            }
+            totalPixels++;
+        }
+
+        // Check right edge
+        for (let py = Math.max(0, Math.floor(y)); py < Math.min(height, Math.ceil(y + h)); py++) {
+            for (let dx = -tolerance; dx <= tolerance; dx++) {
+                const px = Math.floor(x + w) + dx;
+                if (px >= 0 && px < width && edges[py * width + px] === 255) {
+                    edgePixels++;
+                    break;
+                }
+            }
+            totalPixels++;
+        }
+
+        return totalPixels > 0 ? edgePixels / totalPixels : 0;
+    };
+
     // Find ALL valid rectangle candidates and score them
     interface RectCandidate {
         x: number;
@@ -474,6 +533,7 @@ function findRectangle(
         w: number;
         h: number;
         score: number;
+        edgeCoverage: number;
     }
 
     const candidates: RectCandidate[] = [];
@@ -509,10 +569,24 @@ function findRectangle(
 
                     const x = Math.min(v1, v2);
                     const y = Math.min(h1, h2);
+
+                    // Skip if rectangle is outside image bounds
+                    if (x < 0 || y < 0 || x + rectWidth > width || y + rectHeight > height) {
+                        continue;
+                    }
+
                     const rectCenterX = x + rectWidth / 2;
                     const rectCenterY = y + rectHeight / 2;
 
-                    // Score: prefer rectangles close to expected size and centered
+                    // Calculate edge coverage (how well rectangle aligns with Canny edges)
+                    const edgeCoverage = calculateEdgeCoverage(x, y, rectWidth, rectHeight);
+
+                    // Skip candidates with poor edge coverage
+                    if (edgeCoverage < 0.3) {
+                        continue;
+                    }
+
+                    // Score components
                     const sizeMatchW = 1 - Math.abs(rectWidth - expectedWidth) / expectedWidth;
                     const sizeMatchH = 1 - Math.abs(rectHeight - expectedHeight) / expectedHeight;
                     const centerDist = Math.sqrt(
@@ -521,9 +595,10 @@ function findRectangle(
                     );
                     const centerScore = 1 - centerDist / Math.sqrt(width * width + height * height);
 
-                    const score = sizeMatchW * 0.35 + sizeMatchH * 0.35 + centerScore * 0.3;
+                    // New scoring: edge coverage is most important (40%)
+                    const score = edgeCoverage * 0.40 + sizeMatchW * 0.20 + sizeMatchH * 0.20 + centerScore * 0.20;
 
-                    candidates.push({ x, y, w: rectWidth, h: rectHeight, score });
+                    candidates.push({ x, y, w: rectWidth, h: rectHeight, score, edgeCoverage });
                 }
             }
         }
@@ -537,9 +612,11 @@ function findRectangle(
     candidates.sort((a, b) => b.score - a.score);
     const best = candidates[0];
 
-    console.log('[CardDetection] 🎯 Best rectangle candidate:', {
-        ...best,
-        expectedSize: `${expectedWidth.toFixed(0)}x${expectedHeight.toFixed(0)}`,
+    console.log('[CardDetection] 🎯 Best rectangle:', {
+        pos: `${best.x.toFixed(0)},${best.y.toFixed(0)}`,
+        size: `${best.w.toFixed(0)}x${best.h.toFixed(0)}`,
+        edgeCoverage: `${(best.edgeCoverage * 100).toFixed(0)}%`,
+        score: best.score.toFixed(2),
         candidates: candidates.length,
     });
 
@@ -814,7 +891,7 @@ function detectCardInCropRegion(
         'Expected card:', `${expectedWidthInCrop.toFixed(0)}x${expectedHeightInCrop.toFixed(0)}`,
         'Lines:', lines.length, 'Hough threshold:', houghThreshold.toFixed(0));
 
-    let rect = findRectangle(lines, width, height, expectedWidthInCrop, expectedHeightInCrop);
+    let rect = findRectangle(lines, width, height, expectedWidthInCrop, expectedHeightInCrop, edges);
 
     // Step 3: If Hough fails, try contour detection
     if (!rect) {
