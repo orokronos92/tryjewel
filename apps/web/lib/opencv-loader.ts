@@ -143,17 +143,33 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
     // Set up Module BEFORE loading script (OpenCV.js pattern)
     (window as any).Module = {
       onRuntimeInitialized: () => {
-        clearTimeout(timeoutId);
         const cv = (window as any).cv;
-        if (cv && cv.Mat) {
-          const loadTime = (performance.now() - startTime).toFixed(0);
-          console.log(`[OpenCV] ✅ Ready via onRuntimeInitialized in ${loadTime}ms`);
-          cvInstance = cv as OpenCVModule;
-          resolve(cvInstance);
-        } else {
-          console.error('[OpenCV] ❌ onRuntimeInitialized called but cv.Mat not available');
-          reject(new Error('OpenCV initialization failed'));
-        }
+        console.log('[OpenCV] onRuntimeInitialized called, cv state:', {
+          cvExists: !!cv,
+          hasMat: cv && !!cv.Mat,
+          hasMatVector: cv && !!cv.MatVector,
+          cvKeys: cv ? Object.keys(cv).slice(0, 30) : [],
+        });
+
+        // Try waiting a bit for cv.Mat to become available
+        let matCheckAttempts = 0;
+        const checkMat = () => {
+          matCheckAttempts++;
+          const cvNow = (window as any).cv;
+          if (cvNow && cvNow.Mat) {
+            clearTimeout(timeoutId);
+            const loadTime = (performance.now() - startTime).toFixed(0);
+            console.log(`[OpenCV] ✅ Ready via onRuntimeInitialized in ${loadTime}ms (after ${matCheckAttempts} Mat checks)`);
+            cvInstance = cvNow as OpenCVModule;
+            resolve(cvInstance);
+          } else if (matCheckAttempts < 50) {
+            setTimeout(checkMat, 100);
+          } else {
+            console.error('[OpenCV] ❌ cv.Mat never became available after onRuntimeInitialized');
+            // Don't reject - let polling continue
+          }
+        };
+        checkMat();
       }
     };
 
