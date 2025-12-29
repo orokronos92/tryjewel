@@ -596,10 +596,10 @@ function detectCardInFrame(
     const lines = houghLines(edges, width, height, HOUGH_THRESHOLD);
 
     // Convert expected frame size to video coordinates
-    const scaleX = width / containerWidth;
-    const scaleY = height / containerHeight;
-    const expectedWidthVideo = expectedFrameWidth * scaleX;
-    const expectedHeightVideo = expectedFrameHeight * scaleY;
+    const videoScaleX = width / containerWidth;
+    const videoScaleY = height / containerHeight;
+    const expectedWidthVideo = expectedFrameWidth * videoScaleX;
+    const expectedHeightVideo = expectedFrameHeight * videoScaleY;
 
     console.log('[CardDetection] 🔍 Hough lines found:', lines.length,
         'H:', lines.filter(l => l.isHorizontal).length,
