@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
     useCalibrationStore,
     CREDIT_CARD_WIDTH_MM,
@@ -121,6 +121,9 @@ export function CalibrationWizard({
     const [capturedLandmarks, setCapturedLandmarks] = useState<typeof landmarks | null>(null);
     const [stabilityCounter, setStabilityCounter] = useState(0);
 
+    // Ref pour le canvas de debug Canny
+    const debugCanvasRef = useRef<HTMLCanvasElement>(null);
+
     // Fonction pour calculer la distance entre deux landmarks en pixels
     const getLandmarkDistancePx = (
         lm: typeof landmarks,
@@ -234,6 +237,7 @@ export function CalibrationWizard({
         expectedFrameHeight: expectedCardHeight,
         sizeTolerance: 0.20, // ±20% de tolérance sur la taille
         positionTolerance: 40, // ±40px de tolérance sur la position
+        debugCanvasRef, // Canvas pour visualiser les edges Canny
     });
 
     // ⚡ FIX: Synchroniser le store si currentStep est invalide
@@ -487,6 +491,13 @@ export function CalibrationWizard({
 
             return (
                 <div className="relative w-full h-full flex flex-col">
+                    {/* Canvas debug pour visualiser les edges Canny (vert) et rectangle détecté (rouge) */}
+                    <canvas
+                        ref={debugCanvasRef}
+                        className="absolute inset-0 pointer-events-none z-10"
+                        style={{ width: '100%', height: '100%' }}
+                    />
+
                     {/* Zone centrale - cadre de la carte avec détection */}
                     <div className="flex-1 flex items-center justify-center relative">
                         {/* Cadre cible */}

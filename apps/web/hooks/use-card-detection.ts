@@ -31,6 +31,8 @@ interface UseCardDetectionOptions {
     sizeTolerance?: number;
     // Tolerance for position matching (default 40px)
     positionTolerance?: number;
+    // Debug canvas to draw edges visualization
+    debugCanvasRef?: React.RefObject<HTMLCanvasElement | null>;
 }
 
 interface UseCardDetectionResult {
@@ -575,8 +577,86 @@ function findBestCardContour(
 }
 
 // =============================================================================
+// DEBUG VISUALIZATION
+// =============================================================================
+
+function drawDebugVisualization(
+    debugCanvas: HTMLCanvasElement,
+    edges: Uint8Array,
+    videoWidth: number,
+    videoHeight: number,
+    rect: { x: number; y: number; w: number; h: number } | null,
+    containerWidth: number,
+    containerHeight: number
+): void {
+    const ctx = debugCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // Set canvas size to match container
+    debugCanvas.width = containerWidth;
+    debugCanvas.height = containerHeight;
+
+    // Clear
+    ctx.clearRect(0, 0, containerWidth, containerHeight);
+
+    // Scale factors
+    const scaleX = containerWidth / videoWidth;
+    const scaleY = containerHeight / videoHeight;
+
+    // Draw edges in green (semi-transparent)
+    const edgeImageData = ctx.createImageData(containerWidth, containerHeight);
+    for (let y = 0; y < videoHeight; y++) {
+        for (let x = 0; x < videoWidth; x++) {
+            if (edges[y * videoWidth + x] === 255) {
+                // Scale to container coordinates
+                const cx = Math.floor(x * scaleX);
+                const cy = Math.floor(y * scaleY);
+                if (cx < containerWidth && cy < containerHeight) {
+                    const idx = (cy * containerWidth + cx) * 4;
+                    edgeImageData.data[idx] = 0;       // R
+                    edgeImageData.data[idx + 1] = 255; // G
+                    edgeImageData.data[idx + 2] = 0;   // B
+                    edgeImageData.data[idx + 3] = 180; // A
+                }
+            }
+        }
+    }
+    ctx.putImageData(edgeImageData, 0, 0);
+
+    // Draw detected rectangle in red
+    if (rect) {
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(
+            rect.x * scaleX,
+            rect.y * scaleY,
+            rect.w * scaleX,
+            rect.h * scaleY
+        );
+
+        // Draw center cross
+        const cx = (rect.x + rect.w / 2) * scaleX;
+        const cy = (rect.y + rect.h / 2) * scaleY;
+        ctx.beginPath();
+        ctx.moveTo(cx - 10, cy);
+        ctx.lineTo(cx + 10, cy);
+        ctx.moveTo(cx, cy - 10);
+        ctx.lineTo(cx, cy + 10);
+        ctx.stroke();
+    }
+}
+
+// =============================================================================
 // MAIN DETECTION FUNCTION
 // =============================================================================
+
+interface DetectionResult {
+    card: DetectedCard | null;
+    edges: Uint8Array;
+    rect: { x: number; y: number; w: number; h: number } | null;
+    videoWidth: number;
+    videoHeight: number;
+}
 
 function detectCardInFrame(
     imageData: ImageData,
@@ -586,11 +666,14 @@ function detectCardInFrame(
     expectedFrameHeight: number,
     sizeTolerance: number,
     positionTolerance: number
-): DetectedCard | null {
+): DetectionResult {
     const { width, height } = imageData;
 
     // Step 1: Canny edge detection
     const { edges } = cannyEdgeDetection(imageData);
+
+    // Default result
+    const baseResult = { edges, videoWidth: width, videoHeight: height };
 
     // Step 2: Try Hough line detection first
     const lines = houghLines(edges, width, height, HOUGH_THRESHOLD);
@@ -632,7 +715,7 @@ function detectCardInFrame(
 
     if (!rect) {
         console.log('[CardDetection] ❌ No card detected');
-        return null;
+        return { ...baseResult, card: null, rect: null };
     }
 
     // Validate the rectangle is in the center region
@@ -643,7 +726,7 @@ function detectCardInFrame(
     if (rectCenterX < width * centerMargin || rectCenterX > width * (1 - centerMargin) ||
         rectCenterY < height * centerMargin || rectCenterY > height * (1 - centerMargin)) {
         console.log('[CardDetection] ⚠️ Rectangle not centered, ignoring');
-        return null;
+        return { ...baseResult, card: null, rect };
     }
 
     // Convert to container coordinates
@@ -694,7 +777,7 @@ function detectCardInFrame(
         isAligned,
     });
 
-    return {
+    const card: DetectedCard = {
         x: cardX,
         y: cardY,
         width: cardWidth,
@@ -705,6 +788,8 @@ function detectCardInFrame(
         confidence,
         isAligned,
     };
+
+    return { ...baseResult, card, rect };
 }
 
 // =============================================================================
@@ -719,6 +804,7 @@ export function useCardDetection({
     expectedFrameHeight,
     sizeTolerance = 0.20,
     positionTolerance = 40,
+    debugCanvasRef,
 }: UseCardDetectionOptions): UseCardDetectionResult {
     const [detectedCard, setDetectedCard] = useState<DetectedCard | null>(null);
     const [isDetecting, setIsDetecting] = useState(false);
@@ -747,7 +833,7 @@ export function useCardDetection({
         const imageData = getImageData(videoElement, canvasRef.current, ctxRef.current);
         if (!imageData) return;
 
-        const card = detectCardInFrame(
+        const result = detectCardInFrame(
             imageData,
             containerWidth,
             containerHeight,
@@ -757,6 +843,20 @@ export function useCardDetection({
             positionTolerance
         );
 
+        // Draw debug visualization if canvas provided
+        if (debugCanvasRef?.current) {
+            drawDebugVisualization(
+                debugCanvasRef.current,
+                result.edges,
+                result.videoWidth,
+                result.videoHeight,
+                result.rect,
+                containerWidth,
+                containerHeight
+            );
+        }
+
+        const card = result.card;
         setDetectedCard(card);
 
         // Update stability counter
@@ -786,6 +886,7 @@ export function useCardDetection({
         expectedFrameHeight,
         sizeTolerance,
         positionTolerance,
+        debugCanvasRef,
     ]);
 
     // Start detection loop
