@@ -564,11 +564,22 @@ function detectCardInFrame(
 
     // Step 2: Try Hough line detection first
     const lines = houghLines(edges, width, height, HOUGH_THRESHOLD);
+
+    console.log('[CardDetection] 🔍 Hough lines found:', lines.length,
+        'H:', lines.filter(l => l.isHorizontal).length,
+        'V:', lines.filter(l => l.isVertical).length);
+
     let rect = findRectangle(lines, width, height);
+
+    if (rect) {
+        console.log('[CardDetection] 📐 Hough rectangle:', rect);
+    }
 
     // Step 3: If Hough fails, try contour detection
     if (!rect) {
         const contours = findContours(edges, width, height);
+        console.log('[CardDetection] 🔍 Contours found:', contours.length);
+
         const bestContour = findBestCardContour(contours, width, height, expectedFrameWidth, expectedFrameHeight);
 
         if (bestContour) {
@@ -578,10 +589,23 @@ function detectCardInFrame(
                 w: bestContour.maxX - bestContour.minX,
                 h: bestContour.maxY - bestContour.minY
             };
+            console.log('[CardDetection] 📐 Contour rectangle:', rect);
         }
     }
 
     if (!rect) {
+        console.log('[CardDetection] ❌ No card detected');
+        return null;
+    }
+
+    // Validate the rectangle is in the center region
+    const rectCenterX = rect.x + rect.w / 2;
+    const rectCenterY = rect.y + rect.h / 2;
+    const centerMargin = 0.3; // Must be in center 40% of image
+
+    if (rectCenterX < width * centerMargin || rectCenterX > width * (1 - centerMargin) ||
+        rectCenterY < height * centerMargin || rectCenterY > height * (1 - centerMargin)) {
+        console.log('[CardDetection] ⚠️ Rectangle not centered, ignoring');
         return null;
     }
 
@@ -621,6 +645,17 @@ function detectCardInFrame(
     const aspectConfidence = 1 - Math.abs(aspectRatio - CREDIT_CARD_ASPECT_RATIO) / CREDIT_CARD_ASPECT_RATIO;
     const sizeConfidence = Math.min(sizeRatioW, 1 / sizeRatioW) * Math.min(sizeRatioH, 1 / sizeRatioH);
     const confidence = Math.min(1, (aspectConfidence + sizeConfidence) / 2);
+
+    console.log('[CardDetection] 📊 Result:', {
+        cardSize: `${cardWidth.toFixed(0)}x${cardHeight.toFixed(0)}`,
+        expectedSize: `${expectedFrameWidth.toFixed(0)}x${expectedFrameHeight.toFixed(0)}`,
+        sizeRatio: `W:${sizeRatioW.toFixed(2)} H:${sizeRatioH.toFixed(2)}`,
+        posOffset: `X:${positionOffsetX.toFixed(0)} Y:${positionOffsetY.toFixed(0)}`,
+        aspectRatio: aspectRatio.toFixed(2),
+        isSizeMatch,
+        isPositionMatch,
+        isAligned,
+    });
 
     return {
         x: cardX,
