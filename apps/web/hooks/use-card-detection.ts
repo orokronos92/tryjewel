@@ -350,73 +350,103 @@ function houghLines(
     return lines;
 }
 
-// Find the best rectangle from Hough lines
+// Find the best rectangle from Hough lines - matching expected size
 function findRectangle(
     lines: HoughLine[],
     width: number,
-    height: number
+    height: number,
+    expectedWidth: number,
+    expectedHeight: number
 ): { x: number; y: number; w: number; h: number } | null {
     // Separate horizontal and vertical lines
-    const horizontals = lines.filter(l => l.isHorizontal).slice(0, 10);
-    const verticals = lines.filter(l => l.isVertical).slice(0, 10);
+    const horizontals = lines.filter(l => l.isHorizontal).slice(0, 20);
+    const verticals = lines.filter(l => l.isVertical).slice(0, 20);
 
     if (horizontals.length < 2 || verticals.length < 2) {
         return null;
     }
 
-    // Find best pair of horizontals (top/bottom)
-    let bestHPair: [HoughLine, HoughLine] | null = null;
-    let bestHDist = 0;
+    // Image center
+    const centerX = width / 2;
+    const centerY = height / 2;
 
-    for (let i = 0; i < horizontals.length; i++) {
-        for (let j = i + 1; j < horizontals.length; j++) {
-            const dist = Math.abs(horizontals[i].rho - horizontals[j].rho);
-            // Distance should be reasonable (10-80% of image height)
-            if (dist > height * 0.10 && dist < height * 0.80 && dist > bestHDist) {
-                bestHDist = dist;
-                bestHPair = [horizontals[i], horizontals[j]];
+    // Find ALL valid rectangle candidates and score them
+    interface RectCandidate {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        score: number;
+    }
+
+    const candidates: RectCandidate[] = [];
+
+    for (let hi = 0; hi < horizontals.length; hi++) {
+        for (let hj = hi + 1; hj < horizontals.length; hj++) {
+            const h1 = horizontals[hi].rho;
+            const h2 = horizontals[hj].rho;
+            const rectHeight = Math.abs(h2 - h1);
+
+            // Skip if height too different from expected (±50%)
+            if (rectHeight < expectedHeight * 0.5 || rectHeight > expectedHeight * 1.5) {
+                continue;
+            }
+
+            for (let vi = 0; vi < verticals.length; vi++) {
+                for (let vj = vi + 1; vj < verticals.length; vj++) {
+                    const v1 = verticals[vi].rho;
+                    const v2 = verticals[vj].rho;
+                    const rectWidth = Math.abs(v2 - v1);
+
+                    // Skip if width too different from expected (±50%)
+                    if (rectWidth < expectedWidth * 0.5 || rectWidth > expectedWidth * 1.5) {
+                        continue;
+                    }
+
+                    // Check aspect ratio
+                    const aspectRatio = rectWidth / rectHeight;
+                    const ratioMatch = aspectRatio / CREDIT_CARD_ASPECT_RATIO;
+                    if (ratioMatch < 0.8 || ratioMatch > 1.2) {
+                        continue;
+                    }
+
+                    const x = Math.min(v1, v2);
+                    const y = Math.min(h1, h2);
+                    const rectCenterX = x + rectWidth / 2;
+                    const rectCenterY = y + rectHeight / 2;
+
+                    // Score: prefer rectangles close to expected size and centered
+                    const sizeMatchW = 1 - Math.abs(rectWidth - expectedWidth) / expectedWidth;
+                    const sizeMatchH = 1 - Math.abs(rectHeight - expectedHeight) / expectedHeight;
+                    const centerDist = Math.sqrt(
+                        Math.pow(rectCenterX - centerX, 2) +
+                        Math.pow(rectCenterY - centerY, 2)
+                    );
+                    const centerScore = 1 - centerDist / Math.sqrt(width * width + height * height);
+
+                    const score = sizeMatchW * 0.35 + sizeMatchH * 0.35 + centerScore * 0.3;
+
+                    candidates.push({ x, y, w: rectWidth, h: rectHeight, score });
+                }
             }
         }
     }
 
-    // Find best pair of verticals (left/right)
-    let bestVPair: [HoughLine, HoughLine] | null = null;
-    let bestVDist = 0;
-
-    for (let i = 0; i < verticals.length; i++) {
-        for (let j = i + 1; j < verticals.length; j++) {
-            const dist = Math.abs(verticals[i].rho - verticals[j].rho);
-            // Distance should be reasonable (10-80% of image width)
-            if (dist > width * 0.10 && dist < width * 0.80 && dist > bestVDist) {
-                bestVDist = dist;
-                bestVPair = [verticals[i], verticals[j]];
-            }
-        }
-    }
-
-    if (!bestHPair || !bestVPair) {
+    if (candidates.length === 0) {
         return null;
     }
 
-    // Calculate rectangle bounds
-    const y1 = Math.min(bestHPair[0].rho, bestHPair[1].rho);
-    const y2 = Math.max(bestHPair[0].rho, bestHPair[1].rho);
-    const x1 = Math.min(bestVPair[0].rho, bestVPair[1].rho);
-    const x2 = Math.max(bestVPair[0].rho, bestVPair[1].rho);
+    // Pick the best candidate
+    candidates.sort((a, b) => b.score - a.score);
+    const best = candidates[0];
 
-    const rectWidth = x2 - x1;
-    const rectHeight = y2 - y1;
+    console.log('[CardDetection] 🎯 Best rectangle candidate:', {
+        ...best,
+        expectedSize: `${expectedWidth.toFixed(0)}x${expectedHeight.toFixed(0)}`,
+        candidates: candidates.length,
+    });
 
-    // Check aspect ratio
-    const aspectRatio = rectWidth / rectHeight;
-    const targetRatio = CREDIT_CARD_ASPECT_RATIO;
-    const ratioMatch = aspectRatio / targetRatio;
-
-    if (ratioMatch < (1 - ASPECT_RATIO_TOLERANCE) || ratioMatch > (1 + ASPECT_RATIO_TOLERANCE)) {
-        return null;
-    }
-
-    return { x: x1, y: y1, w: rectWidth, h: rectHeight };
+    return { x: best.x, y: best.y, w: best.w, h: best.h };
 }
 
 // =============================================================================
@@ -565,11 +595,18 @@ function detectCardInFrame(
     // Step 2: Try Hough line detection first
     const lines = houghLines(edges, width, height, HOUGH_THRESHOLD);
 
+    // Convert expected frame size to video coordinates
+    const scaleX = width / containerWidth;
+    const scaleY = height / containerHeight;
+    const expectedWidthVideo = expectedFrameWidth * scaleX;
+    const expectedHeightVideo = expectedFrameHeight * scaleY;
+
     console.log('[CardDetection] 🔍 Hough lines found:', lines.length,
         'H:', lines.filter(l => l.isHorizontal).length,
-        'V:', lines.filter(l => l.isVertical).length);
+        'V:', lines.filter(l => l.isVertical).length,
+        'Expected:', `${expectedWidthVideo.toFixed(0)}x${expectedHeightVideo.toFixed(0)}`);
 
-    let rect = findRectangle(lines, width, height);
+    let rect = findRectangle(lines, width, height, expectedWidthVideo, expectedHeightVideo);
 
     if (rect) {
         console.log('[CardDetection] 📐 Hough rectangle:', rect);
