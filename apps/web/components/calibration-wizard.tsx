@@ -18,8 +18,8 @@ import { CreditCard, Hand, Check, X, ChevronRight, Loader2 } from "lucide-react"
 const FINGER_DEPTH_RATIO = 0.85;
 
 // Dimensions anatomiques moyennes d'une main adulte (en mm)
-// Largeur paume (entre index MCP et pinky MCP) ≈ 85mm
-const PALM_WIDTH_MM = 85;
+// Largeur paume MCP→MCP (index à pinky) ≈ 70mm (pas 85mm qui est la paume complète)
+const PALM_WIDTH_MM = 70;
 
 // Indices des landmarks MCP (base des doigts) - MediaPipe
 const MCP_LANDMARKS = {
@@ -29,8 +29,8 @@ const MCP_LANDMARKS = {
     pinky: 17,
 };
 
-// Tolérance pour la détection de distance (±15%)
-const DISTANCE_TOLERANCE = 0.15;
+// Tolérance pour la détection de distance (±5%)
+const DISTANCE_TOLERANCE = 0.05;
 
 // =============================================================================
 // TYPES
@@ -225,7 +225,7 @@ export function CalibrationWizard({
     const expectedPalmWidthPx = currentPixelsPerMm ? PALM_WIDTH_MM * currentPixelsPerMm : null;
 
     // ==========================================================================
-    // DÉTECTION MEDIAPIPE - Capture quand main détectée et stable
+    // DÉTECTION MEDIAPIPE - Vérification distance main = distance carte (±5%)
     // ==========================================================================
     useEffect(() => {
         if (step.type !== 'hand' || !landmarks || landmarks.length < 21) {
@@ -244,23 +244,46 @@ export function CalibrationWizard({
 
         setDetectedPalmWidthPx(palmWidth);
 
-        // Main détectée → incrémenter stabilité (pas de vérification de taille)
-        setStabilityCounter(prev => Math.min(prev + 1, 30));
+        // Vérifier si la main est à la bonne distance (même distance que la carte)
+        // expectedPalmWidthPx = PALM_WIDTH_MM × pixelsPerMm (de la carte)
+        if (expectedPalmWidthPx) {
+            const ratio = palmWidth / expectedPalmWidthPx;
+            const isCorrectDistance = ratio >= (1 - DISTANCE_TOLERANCE) && ratio <= (1 + DISTANCE_TOLERANCE);
 
-        // Valider après 15 frames stables (~0.5 sec)
-        if (stabilityCounter >= 15) {
-            setIsHandAtCorrectDistance(true);
+            console.log('[Calibration] 📏 Vérification distance:', {
+                palmWidthPx: palmWidth.toFixed(1),
+                expectedPx: expectedPalmWidthPx.toFixed(1),
+                ratio: ratio.toFixed(3),
+                tolerance: `±${DISTANCE_TOLERANCE * 100}%`,
+                isCorrect: isCorrectDistance,
+            });
 
-            // Capturer les landmarks quand stable
-            if (!capturedLandmarks) {
-                setCapturedLandmarks([...landmarks]);
-                console.log('[Calibration] ✅ Main capturée!', {
-                    palmWidthPx: palmWidth.toFixed(1),
-                    stabilityFrames: stabilityCounter,
-                });
+            if (isCorrectDistance) {
+                // Incrémenter le compteur de stabilité
+                setStabilityCounter(prev => Math.min(prev + 1, 30));
+            } else {
+                // Reset si hors tolérance
+                setStabilityCounter(0);
+            }
+
+            // Valider après 15 frames stables (~0.5 sec)
+            if (stabilityCounter >= 15) {
+                setIsHandAtCorrectDistance(true);
+
+                // Capturer les landmarks quand stable
+                if (!capturedLandmarks) {
+                    setCapturedLandmarks([...landmarks]);
+                    console.log('[Calibration] ✅ Main capturée à bonne distance!', {
+                        palmWidthPx: palmWidth.toFixed(1),
+                        expectedPx: expectedPalmWidthPx.toFixed(1),
+                        ratio: ratio.toFixed(3),
+                    });
+                }
+            } else {
+                setIsHandAtCorrectDistance(false);
             }
         }
-    }, [landmarks, step.type, containerWidth, containerHeight, stabilityCounter, capturedLandmarks]);
+    }, [landmarks, step.type, expectedPalmWidthPx, containerWidth, containerHeight, stabilityCounter, capturedLandmarks]);
 
     // Reset quand on change d'étape
     useEffect(() => {
@@ -273,8 +296,8 @@ export function CalibrationWizard({
     // Confirmer l'étape actuelle
     const handleConfirm = () => {
         if (step.type === 'card') {
-            // Sauvegarder la calibration carte (taille FIXE)
-            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.40 : containerWidth * 0.20;
+            // Sauvegarder la calibration carte (même taille que le cadre affiché)
+            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.30 : containerWidth * 0.15;
             if (step.distance === 'close') {
                 setCloseCardCalibration(fixedCardWidth);
             } else {
@@ -372,9 +395,9 @@ export function CalibrationWizard({
         if (!step) return null;
 
         if (step.type === 'card') {
-            // Taille FIXE du cadre carte (pas de slider)
-            // À 20cm: carte plus grande (~40% container), à 40cm: ~20% (ratio 2x)
-            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.40 : containerWidth * 0.20;
+            // Taille FIXE du cadre carte pour 20cm et 40cm
+            // Calibré pour que la carte rentre à la bonne distance
+            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.30 : containerWidth * 0.15;
             const fixedCardHeight = fixedCardWidth / (CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM);
 
             return (
@@ -422,19 +445,44 @@ export function CalibrationWizard({
 
         // Taille du cadre carte de référence (même taille que l'étape carte précédente)
         const referenceCardWidth = step.distance === 'close'
-            ? containerWidth * 0.40
-            : containerWidth * 0.20;
+            ? containerWidth * 0.30
+            : containerWidth * 0.15;
         const referenceCardHeight = referenceCardWidth / (CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM);
 
         // Cercle autour du cadre carte (légèrement plus grand)
         const circleSize = Math.max(referenceCardWidth, referenceCardHeight) * 1.3;
 
+        // Ratio détecté vs attendu
+        const distanceRatio = detectedPalmWidthPx && expectedPalmWidthPx
+            ? detectedPalmWidthPx / expectedPalmWidthPx
+            : null;
+
         // Couleur selon l'état
         const getCircleColor = () => {
             if (isHandAtCorrectDistance) return 'rgb(34, 197, 94)'; // green-500
-            if (isDetecting) return 'rgb(234, 179, 8)'; // yellow-500
+            if (distanceRatio && distanceRatio >= (1 - DISTANCE_TOLERANCE) && distanceRatio <= (1 + DISTANCE_TOLERANCE)) {
+                return 'rgb(234, 179, 8)'; // yellow-500 (dans la zone, stabilisation)
+            }
+            if (isDetecting) return 'rgb(239, 68, 68)'; // red-500 (hors zone)
             return 'rgb(59, 130, 246)'; // blue-500
         };
+
+        // Message de guidance
+        const getGuidanceMessage = () => {
+            if (!isDetecting) return null;
+            if (isHandAtCorrectDistance) return null;
+            if (!distanceRatio) return null;
+
+            if (distanceRatio < (1 - DISTANCE_TOLERANCE)) {
+                return { text: 'Rapprochez-vous', color: 'text-red-400' };
+            } else if (distanceRatio > (1 + DISTANCE_TOLERANCE)) {
+                return { text: 'Éloignez-vous', color: 'text-red-400' };
+            } else {
+                return { text: 'Maintenez...', color: 'text-yellow-400' };
+            }
+        };
+
+        const guidance = getGuidanceMessage();
 
         return (
             <div className="relative w-full h-full flex flex-col">
@@ -481,10 +529,22 @@ export function CalibrationWizard({
                                 <Check className="w-5 h-5 text-green-500" />
                                 <span className="text-green-400 text-sm">Main capturée!</span>
                             </div>
+                        ) : guidance ? (
+                            <div className="flex flex-col items-center gap-1">
+                                <div className="flex items-center gap-2">
+                                    <Loader2 className="w-5 h-5 text-yellow-500 animate-spin" />
+                                    <span className={`text-sm font-medium ${guidance.color}`}>{guidance.text}</span>
+                                </div>
+                                {distanceRatio && (
+                                    <span className="text-xs text-gray-500">
+                                        {(distanceRatio * 100).toFixed(0)}% (cible: 95-105%)
+                                    </span>
+                                )}
+                            </div>
                         ) : (
                             <div className="flex items-center gap-2">
                                 <Loader2 className="w-5 h-5 text-yellow-500 animate-spin" />
-                                <span className="text-yellow-400 text-sm">Stabilisation...</span>
+                                <span className="text-yellow-400 text-sm">Détection...</span>
                             </div>
                         )}
                     </div>
