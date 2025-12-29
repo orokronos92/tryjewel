@@ -43,8 +43,8 @@ interface UseCardDetectionResult {
 // =============================================================================
 
 const CREDIT_CARD_ASPECT_RATIO = 85.6 / 53.98; // ~1.586
-const STABILITY_THRESHOLD = 15;
-const DETECTION_INTERVAL = 100;
+const STABILITY_THRESHOLD = 5; // Reduced from 15 for faster validation
+const DETECTION_INTERVAL = 80; // Faster detection
 const DOWNSCALE_WIDTH = 256; // Process at low resolution for speed
 
 // =============================================================================
@@ -178,7 +178,7 @@ interface DetectionResult {
 }
 
 /**
- * Main detection function: Sobel + Histogram peaks
+ * Main detection function: Sobel + Histogram peaks with center weighting
  */
 function detectCardQuadLite(
     srcCanvas: HTMLCanvasElement,
@@ -188,23 +188,33 @@ function detectCardQuadLite(
     const mag = sobelMag(gray, w, h);
     const edges = thresholdEdges(mag, w, h);
 
-    // Build histograms for vertical and horizontal lines
+    // Build histograms with center weighting
+    // Edges near the center of the frame get higher weight
     const histX = new Uint32Array(w);
     const histY = new Uint32Array(h);
+    const cx = w / 2;
+    const cy = h / 2;
 
     for (let y = 0; y < h; y++) {
         const row = y * w;
+        // Weight based on vertical distance from center (1.0 at center, 0.3 at edges)
+        const wy = 0.3 + 0.7 * (1 - Math.abs(y - cy) / cy);
         for (let x = 0; x < w; x++) {
             if (edges[row + x]) {
-                histX[x] += 1;
-                histY[y] += 1;
+                // Weight based on horizontal distance from center
+                const wx = 0.3 + 0.7 * (1 - Math.abs(x - cx) / cx);
+                // For vertical lines (histX), weight by vertical position
+                // For horizontal lines (histY), weight by horizontal position
+                histX[x] += Math.round(wy * 10);
+                histY[y] += Math.round(wx * 10);
             }
         }
     }
 
     // Pick two vertical borders and two horizontal borders
-    const vLines = pickTwoPeaks(histX, Math.round(w * 0.15));
-    const hLines = pickTwoPeaks(histY, Math.round(h * 0.15));
+    // Minimum gap between peaks: expect card to be at least 25% of frame
+    const vLines = pickTwoPeaks(histX, Math.round(w * 0.20));
+    const hLines = pickTwoPeaks(histY, Math.round(h * 0.20));
 
     if (!vLines || !hLines) {
         return { quad: null, edges, w, h, histX, histY, vLines, hLines };
@@ -460,7 +470,7 @@ export function useCardDetection({
         const rectW = maxX - minX;
         const rectH = maxY - minY;
 
-        // Check alignment
+        // Check alignment - relaxed criteria for faster validation
         const expectedWidthInCrop = srcW * (1 / 1.4);
         const expectedHeightInCrop = srcH * (1 / 1.4);
         const cropCenterX = srcW / 2;
@@ -468,17 +478,25 @@ export function useCardDetection({
         const rectCenterX = minX + rectW / 2;
         const rectCenterY = minY + rectH / 2;
 
-        const posToleranceCrop = Math.min(srcW, srcH) * 0.25;
+        // Relaxed position tolerance: 35% of dimension
+        const posToleranceCrop = Math.min(srcW, srcH) * 0.35;
         const offsetX = Math.abs(rectCenterX - cropCenterX);
         const offsetY = Math.abs(rectCenterY - cropCenterY);
 
         const sizeRatioW = rectW / expectedWidthInCrop;
         const sizeRatioH = rectH / expectedHeightInCrop;
 
-        const isSizeMatch = sizeRatioW >= (1 - sizeTolerance) && sizeRatioW <= (1 + sizeTolerance) &&
-                            sizeRatioH >= (1 - sizeTolerance) && sizeRatioH <= (1 + sizeTolerance);
+        // Relaxed size tolerance: 50%
+        const actualSizeTolerance = Math.max(sizeTolerance, 0.5);
+        const isSizeMatch = sizeRatioW >= (1 - actualSizeTolerance) && sizeRatioW <= (1 + actualSizeTolerance) &&
+                            sizeRatioH >= (1 - actualSizeTolerance) && sizeRatioH <= (1 + actualSizeTolerance);
         const isPositionMatch = offsetX <= posToleranceCrop && offsetY <= posToleranceCrop;
         const isAligned = isSizeMatch && isPositionMatch;
+
+        // Debug logging
+        if (!isAligned) {
+            console.log(`[CardDetection] Not aligned: size=${sizeRatioW.toFixed(2)}x${sizeRatioH.toFixed(2)} pos=${offsetX.toFixed(0)},${offsetY.toFixed(0)} (tol: size=${actualSizeTolerance.toFixed(2)}, pos=${posToleranceCrop.toFixed(0)})`);
+        }
 
         // Convert to container coordinates
         const scaleToContainer = drawWidth / srcW;
