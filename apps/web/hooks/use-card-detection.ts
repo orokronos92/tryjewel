@@ -1,5 +1,5 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
-import { loadOpenCV, isOpenCVLoaded, type OpenCVModule, type Mat, type MatVector } from '../lib/opencv-loader';
+import { loadOpenCV, type OpenCVModule } from '../lib/opencv-loader';
 
 // =============================================================================
 // TYPES

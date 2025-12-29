@@ -98,8 +98,11 @@ export interface RotatedRect {
 let cvLoadPromise: Promise<OpenCVModule> | null = null;
 let cvInstance: OpenCVModule | null = null;
 
+// OpenCV.js CDN URL (smaller build, ~8MB)
+const OPENCV_CDN_URL = 'https://docs.opencv.org/4.9.0/opencv.js';
+
 /**
- * Load OpenCV.js lazily
+ * Load OpenCV.js lazily from CDN
  * Returns the same promise if already loading/loaded
  */
 export async function loadOpenCV(): Promise<OpenCVModule> {
@@ -113,45 +116,67 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
     return cvLoadPromise;
   }
 
-  // Start loading
+  // Check if already loaded globally
+  if (typeof window !== 'undefined' && (window as any).cv) {
+    cvInstance = (window as any).cv as OpenCVModule;
+    return cvInstance;
+  }
+
+  // Start loading from CDN
   cvLoadPromise = new Promise<OpenCVModule>((resolve, reject) => {
-    console.log('[OpenCV] Loading OpenCV.js...');
+    console.log('[OpenCV] Loading OpenCV.js from CDN...');
     const startTime = performance.now();
 
-    // Dynamic import
-    import('@techstark/opencv-js')
-      .then((cvModule) => {
-        // The module exports cv directly or as default
-        const cv = (cvModule as any).default || cvModule;
+    // Create script element
+    const script = document.createElement('script');
+    script.src = OPENCV_CDN_URL;
+    script.async = true;
 
-        // Wait for OpenCV to be ready (it has an onRuntimeInitialized callback)
-        if (cv.onRuntimeInitialized) {
-          // Already initialized
+    script.onload = () => {
+      // OpenCV.js sets up cv on window and calls onRuntimeInitialized when ready
+      const checkReady = () => {
+        const cv = (window as any).cv;
+        if (cv && cv.Mat) {
           const loadTime = (performance.now() - startTime).toFixed(0);
           console.log(`[OpenCV] ✅ Loaded in ${loadTime}ms`);
           cvInstance = cv as OpenCVModule;
           resolve(cvInstance);
-        } else if (typeof cv.then === 'function') {
-          // It's a promise
+        } else if (cv && typeof cv.then === 'function') {
+          // cv is a promise (newer builds)
           cv.then((readyCv: OpenCVModule) => {
             const loadTime = (performance.now() - startTime).toFixed(0);
             console.log(`[OpenCV] ✅ Loaded in ${loadTime}ms`);
             cvInstance = readyCv;
+            (window as any).cv = readyCv; // Update global reference
             resolve(cvInstance);
-          });
+          }).catch(reject);
         } else {
-          // Assume it's ready
-          const loadTime = (performance.now() - startTime).toFixed(0);
-          console.log(`[OpenCV] ✅ Loaded in ${loadTime}ms`);
-          cvInstance = cv as OpenCVModule;
-          resolve(cvInstance);
+          // Not ready yet, wait a bit
+          setTimeout(checkReady, 100);
         }
-      })
-      .catch((error) => {
-        console.error('[OpenCV] ❌ Failed to load:', error);
-        cvLoadPromise = null; // Allow retry
-        reject(error);
-      });
+      };
+
+      // Set up the onRuntimeInitialized callback before checking
+      if (!(window as any).cv) {
+        (window as any).cv = {};
+      }
+      const originalCallback = (window as any).cv.onRuntimeInitialized;
+      (window as any).cv.onRuntimeInitialized = () => {
+        if (originalCallback) originalCallback();
+        checkReady();
+      };
+
+      // Also check immediately in case it's already ready
+      setTimeout(checkReady, 50);
+    };
+
+    script.onerror = (error) => {
+      console.error('[OpenCV] ❌ Failed to load from CDN:', error);
+      cvLoadPromise = null; // Allow retry
+      reject(new Error('Failed to load OpenCV.js from CDN'));
+    };
+
+    document.head.appendChild(script);
   });
 
   return cvLoadPromise;
