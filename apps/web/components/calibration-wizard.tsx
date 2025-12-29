@@ -60,9 +60,6 @@ const ASSUMED_FOV_DEG = 65;
 // Réduction du cadre de 30% pour mieux correspondre à la réalité
 const FRAME_SIZE_FACTOR = 0.7;
 
-// Tolérance de distance: ±5%
-const DISTANCE_TOLERANCE = 0.05;
-
 // Calcul de la taille du cadre carte à une distance donnée
 // visibleWidth = 2 × distance × tan(FOV/2)
 // cardPixels = (cardWidthMM / visibleWidth) × videoWidth
