@@ -187,16 +187,39 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
 
         // Check if cv is a Promise (newer OpenCV.js pattern)
         if (cv && typeof cv.then === 'function' && !cvInstance) {
-          console.log('[OpenCV] cv is a Promise, awaiting...');
+          console.log('[OpenCV] cv is a Promise, awaiting...', {
+            cvKeys: Object.keys(cv).slice(0, 20),
+            hasOnRuntimeInitialized: 'onRuntimeInitialized' in cv,
+          });
+
+          // Set a timeout for the Promise
+          const promiseTimeout = setTimeout(() => {
+            console.error('[OpenCV] ❌ Promise timeout - checking if cv has Mat now...');
+            if (cv.Mat) {
+              console.log('[OpenCV] ✅ cv.Mat available after Promise timeout!');
+              clearTimeout(timeoutId);
+              cvInstance = cv as OpenCVModule;
+              resolve(cvInstance);
+            }
+          }, 5000);
+
           cv.then((readyCv: OpenCVModule) => {
+            clearTimeout(promiseTimeout);
             clearTimeout(timeoutId);
             const loadTime = (performance.now() - startTime).toFixed(0);
             console.log(`[OpenCV] ✅ Ready via Promise in ${loadTime}ms`);
-            cvInstance = readyCv;
-            (window as any).cv = readyCv;
+            cvInstance = readyCv || cv; // Use cv if readyCv is undefined
+            (window as any).cv = cvInstance;
             resolve(cvInstance);
           }).catch((err: Error) => {
+            clearTimeout(promiseTimeout);
             console.error('[OpenCV] Promise rejected:', err);
+            // Try using cv directly if it has Mat
+            if (cv.Mat) {
+              console.log('[OpenCV] ✅ Using cv directly after Promise rejection');
+              cvInstance = cv as OpenCVModule;
+              resolve(cvInstance);
+            }
           });
           return; // Stop polling
         }
