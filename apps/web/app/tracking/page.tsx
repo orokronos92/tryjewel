@@ -126,6 +126,7 @@ export default function TrackingPage() {
     isCalibrated,
     setIsCalibrating,
     resetCalibration,
+    calculatedFOV,
   } = useCalibrationStore();
 
   // ⚡ Reset calibration au démarrage de la session (une seule fois)
@@ -557,6 +558,11 @@ export default function TrackingPage() {
                   <div className="text-xs text-yellow-400 mt-1">
                     📊 T{currentTier} {getTierName(currentTier)} • Skip:{tierConfig.frameSkip}
                   </div>
+                  {calculatedFOV && (
+                    <div className="text-xs text-purple-400 mt-1">
+                      📷 FOV: {calculatedFOV.horizontal.toFixed(0)}°×{calculatedFOV.vertical.toFixed(0)}° • f={calculatedFOV.focalLengthPx}px
+                    </div>
+                  )}
                 </div>
               )}
 
