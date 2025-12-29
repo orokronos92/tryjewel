@@ -173,6 +173,16 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
         attempts++;
         const cv = (window as any).cv;
 
+        // Debug: log cv state
+        if (attempts <= 5 || attempts % 10 === 0) {
+          console.log(`[OpenCV] Polling attempt ${attempts}:`, {
+            cvExists: !!cv,
+            cvType: typeof cv,
+            cvKeys: cv ? Object.keys(cv).slice(0, 10) : [],
+            hasMat: cv && !!cv.Mat,
+          });
+        }
+
         if (cv && cv.Mat) {
           clearTimeout(timeoutId);
           if (!cvInstance) { // Avoid duplicate resolve
@@ -183,6 +193,12 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
           }
         } else if (attempts < maxAttempts) {
           setTimeout(checkReady, 100);
+        } else {
+          console.error('[OpenCV] ❌ Max polling attempts reached, cv state:', {
+            cvExists: !!cv,
+            cvType: typeof cv,
+            cvKeys: cv ? Object.keys(cv).slice(0, 20) : [],
+          });
         }
         // Don't reject here - let timeout handle failure
       };
