@@ -70,21 +70,116 @@ const HOUGH_RHO = 1; // Distance resolution in pixels
 const HOUGH_THETA_STEPS = 180; // Angle resolution
 
 // =============================================================================
+// VIDEO BOUNDS CALCULATION (for object-fit alignment)
+// =============================================================================
+
+interface VideoBounds {
+    // Actual video display area within container
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    // Scale factors from video pixels to display pixels
+    scaleX: number;
+    scaleY: number;
+}
+
+function getVideoBounds(
+    video: HTMLVideoElement,
+    containerWidth: number,
+    containerHeight: number
+): VideoBounds {
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+
+    if (!videoWidth || !videoHeight) {
+        return { x: 0, y: 0, width: containerWidth, height: containerHeight, scaleX: 1, scaleY: 1 };
+    }
+
+    // Calculate aspect ratios
+    const videoAspect = videoWidth / videoHeight;
+    const containerAspect = containerWidth / containerHeight;
+
+    let displayWidth: number;
+    let displayHeight: number;
+    let offsetX: number;
+    let offsetY: number;
+
+    // Assume object-fit: contain (letterbox) - video fits inside container
+    if (videoAspect > containerAspect) {
+        // Video is wider - letterbox top/bottom
+        displayWidth = containerWidth;
+        displayHeight = containerWidth / videoAspect;
+        offsetX = 0;
+        offsetY = (containerHeight - displayHeight) / 2;
+    } else {
+        // Video is taller - letterbox left/right
+        displayHeight = containerHeight;
+        displayWidth = containerHeight * videoAspect;
+        offsetX = (containerWidth - displayWidth) / 2;
+        offsetY = 0;
+    }
+
+    return {
+        x: offsetX,
+        y: offsetY,
+        width: displayWidth,
+        height: displayHeight,
+        scaleX: displayWidth / videoWidth,
+        scaleY: displayHeight / videoHeight,
+    };
+}
+
+// =============================================================================
 // IMAGE PROCESSING - CANNY EDGE DETECTION
 // =============================================================================
 
-function getImageData(
+// Extract ONLY the frame region from video (much faster!)
+function getFrameRegionImageData(
     video: HTMLVideoElement,
     canvas: HTMLCanvasElement,
-    ctx: CanvasRenderingContext2D
+    ctx: CanvasRenderingContext2D,
+    frameX: number,  // Frame position in container coords
+    frameY: number,
+    frameWidth: number,
+    frameHeight: number,
+    videoBounds: VideoBounds
 ): ImageData | null {
     if (!video.videoWidth || !video.videoHeight) return null;
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Add margin around frame for edge detection (20%)
+    const margin = 0.2;
+    const marginX = frameWidth * margin;
+    const marginY = frameHeight * margin;
 
-    ctx.drawImage(video, 0, 0);
-    return ctx.getImageData(0, 0, canvas.width, canvas.height);
+    // Frame bounds in container coords (with margin)
+    const cropX = Math.max(0, frameX - marginX);
+    const cropY = Math.max(0, frameY - marginY);
+    const cropW = Math.min(frameWidth + marginX * 2, videoBounds.width - (cropX - videoBounds.x));
+    const cropH = Math.min(frameHeight + marginY * 2, videoBounds.height - (cropY - videoBounds.y));
+
+    // Convert to video pixel coords
+    const videoX = Math.floor((cropX - videoBounds.x) / videoBounds.scaleX);
+    const videoY = Math.floor((cropY - videoBounds.y) / videoBounds.scaleY);
+    const videoW = Math.floor(cropW / videoBounds.scaleX);
+    const videoH = Math.floor(cropH / videoBounds.scaleY);
+
+    // Clamp to video bounds
+    const srcX = Math.max(0, Math.min(videoX, video.videoWidth - 1));
+    const srcY = Math.max(0, Math.min(videoY, video.videoHeight - 1));
+    const srcW = Math.min(videoW, video.videoWidth - srcX);
+    const srcH = Math.min(videoH, video.videoHeight - srcY);
+
+    if (srcW <= 0 || srcH <= 0) return null;
+
+    // Set canvas to crop size
+    canvas.width = srcW;
+    canvas.height = srcH;
+
+    // Draw only the cropped region
+    ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
+
+    return ctx.getImageData(0, 0, srcW, srcH);
 }
 
 function toGrayscale(imageData: ImageData): Float32Array {
@@ -583,9 +678,14 @@ function findBestCardContour(
 function drawDebugVisualization(
     debugCanvas: HTMLCanvasElement,
     edges: Uint8Array,
-    videoWidth: number,
-    videoHeight: number,
+    cropWidth: number,  // Size of the cropped region we analyzed
+    cropHeight: number,
     rect: { x: number; y: number; w: number; h: number } | null,
+    // Where to draw in container coords
+    drawX: number,
+    drawY: number,
+    drawWidth: number,
+    drawHeight: number,
     containerWidth: number,
     containerHeight: number
 ): void {
@@ -599,19 +699,19 @@ function drawDebugVisualization(
     // Clear
     ctx.clearRect(0, 0, containerWidth, containerHeight);
 
-    // Scale factors
-    const scaleX = containerWidth / videoWidth;
-    const scaleY = containerHeight / videoHeight;
+    // Scale factors from crop region to draw region
+    const scaleX = drawWidth / cropWidth;
+    const scaleY = drawHeight / cropHeight;
 
-    // Draw edges in green (semi-transparent)
+    // Draw edges in green - only in the crop region area
     const edgeImageData = ctx.createImageData(containerWidth, containerHeight);
-    for (let y = 0; y < videoHeight; y++) {
-        for (let x = 0; x < videoWidth; x++) {
-            if (edges[y * videoWidth + x] === 255) {
-                // Scale to container coordinates
-                const cx = Math.floor(x * scaleX);
-                const cy = Math.floor(y * scaleY);
-                if (cx < containerWidth && cy < containerHeight) {
+    for (let y = 0; y < cropHeight; y++) {
+        for (let x = 0; x < cropWidth; x++) {
+            if (edges[y * cropWidth + x] === 255) {
+                // Scale to container coordinates within the draw region
+                const cx = Math.floor(drawX + x * scaleX);
+                const cy = Math.floor(drawY + y * scaleY);
+                if (cx >= 0 && cx < containerWidth && cy >= 0 && cy < containerHeight) {
                     const idx = (cy * containerWidth + cx) * 4;
                     edgeImageData.data[idx] = 0;       // R
                     edgeImageData.data[idx + 1] = 255; // G
@@ -623,20 +723,20 @@ function drawDebugVisualization(
     }
     ctx.putImageData(edgeImageData, 0, 0);
 
-    // Draw detected rectangle in red
+    // Draw detected rectangle in red (in draw region coords)
     if (rect) {
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 3;
         ctx.strokeRect(
-            rect.x * scaleX,
-            rect.y * scaleY,
+            drawX + rect.x * scaleX,
+            drawY + rect.y * scaleY,
             rect.w * scaleX,
             rect.h * scaleY
         );
 
         // Draw center cross
-        const cx = (rect.x + rect.w / 2) * scaleX;
-        const cy = (rect.y + rect.h / 2) * scaleY;
+        const cx = drawX + (rect.x + rect.w / 2) * scaleX;
+        const cy = drawY + (rect.y + rect.h / 2) * scaleY;
         ctx.beginPath();
         ctx.moveTo(cx - 10, cy);
         ctx.lineTo(cx + 10, cy);
@@ -644,6 +744,13 @@ function drawDebugVisualization(
         ctx.lineTo(cx, cy + 10);
         ctx.stroke();
     }
+
+    // Draw the analysis region border (cyan dashed)
+    ctx.strokeStyle = 'cyan';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.strokeRect(drawX, drawY, drawWidth, drawHeight);
+    ctx.setLineDash([]);
 }
 
 // =============================================================================
@@ -654,53 +761,67 @@ interface DetectionResult {
     card: DetectedCard | null;
     edges: Uint8Array;
     rect: { x: number; y: number; w: number; h: number } | null;
-    videoWidth: number;
-    videoHeight: number;
+    cropWidth: number;
+    cropHeight: number;
+    // Where the crop region is in container coords (for debug drawing)
+    drawX: number;
+    drawY: number;
+    drawWidth: number;
+    drawHeight: number;
 }
 
-function detectCardInFrame(
+function detectCardInCropRegion(
     imageData: ImageData,
+    // Frame position in container coords
+    frameX: number,
+    frameY: number,
+    frameWidth: number,
+    frameHeight: number,
+    // For alignment check
     containerWidth: number,
     containerHeight: number,
-    expectedFrameWidth: number,
-    expectedFrameHeight: number,
     sizeTolerance: number,
-    positionTolerance: number
+    positionTolerance: number,
+    // Crop region info for debug
+    drawX: number,
+    drawY: number,
+    drawWidth: number,
+    drawHeight: number
 ): DetectionResult {
     const { width, height } = imageData;
 
-    // Step 1: Canny edge detection
+    // Step 1: Canny edge detection on the cropped region
     const { edges } = cannyEdgeDetection(imageData);
 
     // Default result
-    const baseResult = { edges, videoWidth: width, videoHeight: height };
+    const baseResult = {
+        edges,
+        cropWidth: width,
+        cropHeight: height,
+        drawX,
+        drawY,
+        drawWidth,
+        drawHeight
+    };
 
-    // Step 2: Try Hough line detection first
+    // Expected card size in crop region pixels
+    // The frame should roughly fill the crop region (since we added 20% margin each side)
+    const expectedWidthInCrop = width * (1 / 1.4);  // ~70% of crop width
+    const expectedHeightInCrop = height * (1 / 1.4);
+
+    // Step 2: Try Hough line detection
     const lines = houghLines(edges, width, height, HOUGH_THRESHOLD);
 
-    // Convert expected frame size to video coordinates
-    const videoScaleX = width / containerWidth;
-    const videoScaleY = height / containerHeight;
-    const expectedWidthVideo = expectedFrameWidth * videoScaleX;
-    const expectedHeightVideo = expectedFrameHeight * videoScaleY;
+    console.log('[CardDetection] 🔍 Crop region:', `${width}x${height}`,
+        'Expected card:', `${expectedWidthInCrop.toFixed(0)}x${expectedHeightInCrop.toFixed(0)}`,
+        'Lines:', lines.length);
 
-    console.log('[CardDetection] 🔍 Hough lines found:', lines.length,
-        'H:', lines.filter(l => l.isHorizontal).length,
-        'V:', lines.filter(l => l.isVertical).length,
-        'Expected:', `${expectedWidthVideo.toFixed(0)}x${expectedHeightVideo.toFixed(0)}`);
-
-    let rect = findRectangle(lines, width, height, expectedWidthVideo, expectedHeightVideo);
-
-    if (rect) {
-        console.log('[CardDetection] 📐 Hough rectangle:', rect);
-    }
+    let rect = findRectangle(lines, width, height, expectedWidthInCrop, expectedHeightInCrop);
 
     // Step 3: If Hough fails, try contour detection
     if (!rect) {
         const contours = findContours(edges, width, height);
-        console.log('[CardDetection] 🔍 Contours found:', contours.length);
-
-        const bestContour = findBestCardContour(contours, width, height, expectedFrameWidth, expectedFrameHeight);
+        const bestContour = findBestCardContour(contours, width, height, expectedWidthInCrop, expectedHeightInCrop);
 
         if (bestContour) {
             rect = {
@@ -709,69 +830,54 @@ function detectCardInFrame(
                 w: bestContour.maxX - bestContour.minX,
                 h: bestContour.maxY - bestContour.minY
             };
-            console.log('[CardDetection] 📐 Contour rectangle:', rect);
         }
     }
 
     if (!rect) {
-        console.log('[CardDetection] ❌ No card detected');
         return { ...baseResult, card: null, rect: null };
     }
 
-    // Validate the rectangle is in the center region
+    // Check if rectangle is roughly centered in the crop region
     const rectCenterX = rect.x + rect.w / 2;
     const rectCenterY = rect.y + rect.h / 2;
-    const centerMargin = 0.3; // Must be in center 40% of image
+    const cropCenterX = width / 2;
+    const cropCenterY = height / 2;
 
-    if (rectCenterX < width * centerMargin || rectCenterX > width * (1 - centerMargin) ||
-        rectCenterY < height * centerMargin || rectCenterY > height * (1 - centerMargin)) {
-        console.log('[CardDetection] ⚠️ Rectangle not centered, ignoring');
-        return { ...baseResult, card: null, rect };
-    }
+    // Position tolerance in crop pixels (roughly 15% of crop size)
+    const posToleranceCrop = Math.min(width, height) * 0.15;
 
-    // Convert to container coordinates
-    const scaleX = containerWidth / width;
-    const scaleY = containerHeight / height;
+    const offsetX = Math.abs(rectCenterX - cropCenterX);
+    const offsetY = Math.abs(rectCenterY - cropCenterY);
 
-    const cardX = rect.x * scaleX;
-    const cardY = rect.y * scaleY;
-    const cardWidth = rect.w * scaleX;
-    const cardHeight = rect.h * scaleY;
-    const cardCenterX = cardX + cardWidth / 2;
-    const cardCenterY = cardY + cardHeight / 2;
-    const aspectRatio = cardWidth / cardHeight;
-
-    // Expected frame center
-    const frameCenterX = containerWidth / 2;
-    const frameCenterY = containerHeight / 2;
-
-    // Check alignment
-    const sizeRatioW = cardWidth / expectedFrameWidth;
-    const sizeRatioH = cardHeight / expectedFrameHeight;
-    const positionOffsetX = Math.abs(cardCenterX - frameCenterX);
-    const positionOffsetY = Math.abs(cardCenterY - frameCenterY);
+    // Size check - rectangle should be close to expected size
+    const sizeRatioW = rect.w / expectedWidthInCrop;
+    const sizeRatioH = rect.h / expectedHeightInCrop;
 
     const isSizeMatch =
         sizeRatioW >= (1 - sizeTolerance) && sizeRatioW <= (1 + sizeTolerance) &&
         sizeRatioH >= (1 - sizeTolerance) && sizeRatioH <= (1 + sizeTolerance);
 
-    const isPositionMatch =
-        positionOffsetX <= positionTolerance &&
-        positionOffsetY <= positionTolerance;
-
+    const isPositionMatch = offsetX <= posToleranceCrop && offsetY <= posToleranceCrop;
     const isAligned = isSizeMatch && isPositionMatch;
 
     // Calculate confidence
+    const aspectRatio = rect.w / rect.h;
     const aspectConfidence = 1 - Math.abs(aspectRatio - CREDIT_CARD_ASPECT_RATIO) / CREDIT_CARD_ASPECT_RATIO;
     const sizeConfidence = Math.min(sizeRatioW, 1 / sizeRatioW) * Math.min(sizeRatioH, 1 / sizeRatioH);
-    const confidence = Math.min(1, (aspectConfidence + sizeConfidence) / 2);
+    const confidence = Math.min(1, Math.max(0, (aspectConfidence + sizeConfidence) / 2));
+
+    // Convert rectangle to container coordinates
+    const scaleToContainer = drawWidth / width;
+    const cardX = drawX + rect.x * scaleToContainer;
+    const cardY = drawY + rect.y * scaleToContainer;
+    const cardWidth = rect.w * scaleToContainer;
+    const cardHeight = rect.h * scaleToContainer;
 
     console.log('[CardDetection] 📊 Result:', {
-        cardSize: `${cardWidth.toFixed(0)}x${cardHeight.toFixed(0)}`,
-        expectedSize: `${expectedFrameWidth.toFixed(0)}x${expectedFrameHeight.toFixed(0)}`,
+        rectInCrop: `${rect.x.toFixed(0)},${rect.y.toFixed(0)} ${rect.w.toFixed(0)}x${rect.h.toFixed(0)}`,
+        cardInContainer: `${cardX.toFixed(0)},${cardY.toFixed(0)} ${cardWidth.toFixed(0)}x${cardHeight.toFixed(0)}`,
         sizeRatio: `W:${sizeRatioW.toFixed(2)} H:${sizeRatioH.toFixed(2)}`,
-        posOffset: `X:${positionOffsetX.toFixed(0)} Y:${positionOffsetY.toFixed(0)}`,
-        aspectRatio: aspectRatio.toFixed(2),
+        posOffset: `X:${offsetX.toFixed(0)} Y:${offsetY.toFixed(0)}`,
         isSizeMatch,
         isPositionMatch,
         isAligned,
@@ -782,8 +888,8 @@ function detectCardInFrame(
         y: cardY,
         width: cardWidth,
         height: cardHeight,
-        centerX: cardCenterX,
-        centerY: cardCenterY,
+        centerX: cardX + cardWidth / 2,
+        centerY: cardY + cardHeight / 2,
         aspectRatio,
         confidence,
         isAligned,
@@ -830,17 +936,50 @@ export function useCardDetection({
             return;
         }
 
-        const imageData = getImageData(videoElement, canvasRef.current, ctxRef.current);
-        if (!imageData) return;
+        // Calculate video display bounds (accounting for object-fit)
+        const videoBounds = getVideoBounds(videoElement, containerWidth, containerHeight);
 
-        const result = detectCardInFrame(
-            imageData,
-            containerWidth,
-            containerHeight,
+        // Calculate frame position (centered in container)
+        const frameX = (containerWidth - expectedFrameWidth) / 2;
+        const frameY = (containerHeight - expectedFrameHeight) / 2;
+
+        // Calculate the crop region with margin
+        const margin = 0.2;
+        const marginX = expectedFrameWidth * margin;
+        const marginY = expectedFrameHeight * margin;
+        const drawX = Math.max(videoBounds.x, frameX - marginX);
+        const drawY = Math.max(videoBounds.y, frameY - marginY);
+        const drawWidth = Math.min(expectedFrameWidth + marginX * 2, videoBounds.width);
+        const drawHeight = Math.min(expectedFrameHeight + marginY * 2, videoBounds.height);
+
+        // Extract only the frame region from video
+        const imageData = getFrameRegionImageData(
+            videoElement,
+            canvasRef.current,
+            ctxRef.current,
+            frameX,
+            frameY,
             expectedFrameWidth,
             expectedFrameHeight,
+            videoBounds
+        );
+        if (!imageData) return;
+
+        // Detect card in the cropped region
+        const result = detectCardInCropRegion(
+            imageData,
+            frameX,
+            frameY,
+            expectedFrameWidth,
+            expectedFrameHeight,
+            containerWidth,
+            containerHeight,
             sizeTolerance,
-            positionTolerance
+            positionTolerance,
+            drawX,
+            drawY,
+            drawWidth,
+            drawHeight
         );
 
         // Draw debug visualization if canvas provided
@@ -848,9 +987,13 @@ export function useCardDetection({
             drawDebugVisualization(
                 debugCanvasRef.current,
                 result.edges,
-                result.videoWidth,
-                result.videoHeight,
+                result.cropWidth,
+                result.cropHeight,
                 result.rect,
+                result.drawX,
+                result.drawY,
+                result.drawWidth,
+                result.drawHeight,
                 containerWidth,
                 containerHeight
             );
