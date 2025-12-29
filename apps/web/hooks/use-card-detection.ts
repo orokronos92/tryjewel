@@ -61,11 +61,11 @@ const STABILITY_THRESHOLD = 15;
 const DETECTION_INTERVAL = 100; // 10 FPS
 
 // Canny thresholds
-const CANNY_LOW = 50;
-const CANNY_HIGH = 150;
+const CANNY_LOW = 40;  // Lowered for better edge detection
+const CANNY_HIGH = 120;
 
 // Hough parameters
-const HOUGH_THRESHOLD = 50; // Minimum votes for a line
+const HOUGH_THRESHOLD_BASE = 40; // Base threshold, will be scaled by image size
 const HOUGH_RHO = 1; // Distance resolution in pixels
 const HOUGH_THETA_STEPS = 180; // Angle resolution
 
@@ -802,12 +802,17 @@ function detectCardInCropRegion(
     const expectedWidthInCrop = width * (1 / 1.4);  // ~70% of crop width
     const expectedHeightInCrop = height * (1 / 1.4);
 
+    // Adaptive Hough threshold based on image size
+    // Smaller images have fewer edge pixels, so need lower threshold
+    const imageSize = Math.sqrt(width * height);
+    const houghThreshold = Math.max(20, Math.min(60, HOUGH_THRESHOLD_BASE * (imageSize / 300)));
+
     // Step 2: Try Hough line detection
-    const lines = houghLines(edges, width, height, HOUGH_THRESHOLD);
+    const lines = houghLines(edges, width, height, houghThreshold);
 
     console.log('[CardDetection] 🔍 Crop region:', `${width}x${height}`,
         'Expected card:', `${expectedWidthInCrop.toFixed(0)}x${expectedHeightInCrop.toFixed(0)}`,
-        'Lines:', lines.length);
+        'Lines:', lines.length, 'Hough threshold:', houghThreshold.toFixed(0));
 
     let rect = findRectangle(lines, width, height, expectedWidthInCrop, expectedHeightInCrop);
 
@@ -836,8 +841,8 @@ function detectCardInCropRegion(
     const cropCenterX = width / 2;
     const cropCenterY = height / 2;
 
-    // Position tolerance in crop pixels (roughly 15% of crop size)
-    const posToleranceCrop = Math.min(width, height) * 0.15;
+    // Position tolerance in crop pixels (20% of crop size - more forgiving)
+    const posToleranceCrop = Math.min(width, height) * 0.20;
 
     const offsetX = Math.abs(rectCenterX - cropCenterX);
     const offsetY = Math.abs(rectCenterY - cropCenterY);

@@ -235,8 +235,8 @@ export function CalibrationWizard({
         containerHeight,
         expectedFrameWidth: expectedCardWidth,
         expectedFrameHeight: expectedCardHeight,
-        sizeTolerance: 0.20, // ±20% de tolérance sur la taille
-        positionTolerance: 40, // ±40px de tolérance sur la position
+        sizeTolerance: 0.25, // ±25% de tolérance sur la taille
+        positionTolerance: 50, // ±50px de tolérance sur la position
         debugCanvasRef, // Canvas pour visualiser les edges Canny
     });
 
