@@ -541,6 +541,9 @@ function findRectanglesFromContours(
     const centerX = width / 2;
     const centerY = height / 2;
 
+    // Margin to reject rectangles too close to crop boundary
+    const boundaryMargin = 10;
+
     for (const contour of contours) {
         // Skip small contours
         if (contour.points.length < 20) continue;
@@ -575,9 +578,15 @@ function findRectanglesFromContours(
         const rectW = maxX - minX;
         const rectH = maxY - minY;
 
+        // IMPORTANT: Skip rectangles too close to the crop boundary (likely the boundary itself!)
+        if (minX < boundaryMargin || minY < boundaryMargin ||
+            maxX > width - boundaryMargin || maxY > height - boundaryMargin) {
+            continue;
+        }
+
         // Skip if too small or too large
-        if (rectW < expectedWidth * 0.4 || rectW > expectedWidth * 1.6) continue;
-        if (rectH < expectedHeight * 0.4 || rectH > expectedHeight * 1.6) continue;
+        if (rectW < expectedWidth * 0.5 || rectW > expectedWidth * 1.5) continue;
+        if (rectH < expectedHeight * 0.5 || rectH > expectedHeight * 1.5) continue;
 
         // Check aspect ratio
         const aspectRatio = rectW / rectH;
