@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
     useCalibrationStore,
     CREDIT_CARD_WIDTH_MM,
@@ -11,8 +11,9 @@ import {
     circumferenceToRingSizes,
 } from "@/stores/calibration-store";
 import { useEdgeTrackingStore } from "@/stores/edge-tracking-store";
+import { useCardDetection } from "@/hooks/use-card-detection";
 import { Button } from "@/components/ui/button";
-import { CreditCard, Hand, Check, X, ChevronRight, Loader2 } from "lucide-react";
+import { CreditCard, Hand, Check, X, ChevronRight, Loader2, MoveHorizontal, MoveVertical, ZoomIn, ZoomOut } from "lucide-react";
 
 // Ratio profondeur/largeur pour les doigts (ellipse, doigt vu de face vs profil)
 const FINGER_DEPTH_RATIO = 0.85;
@@ -208,6 +209,33 @@ export function CalibrationWizard({
     // Debug log
     console.log('[CalibrationWizard] 🎯 Render:', { currentStep, stepIndex, stepTitle: step.title });
 
+    // ==========================================================================
+    // CARD DETECTION - Calcul des dimensions attendues pour le cadre carte
+    // ==========================================================================
+    const expectedCardWidth = useMemo(() => {
+        if (step.type !== 'card') return 0;
+        return step.distance === 'close' ? containerWidth * 0.30 : containerWidth * 0.15;
+    }, [step.type, step.distance, containerWidth]);
+
+    const expectedCardHeight = useMemo(() => {
+        return expectedCardWidth / (CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM);
+    }, [expectedCardWidth]);
+
+    // Hook de détection automatique de la carte
+    const {
+        detectedCard,
+        isCardAligned,
+        stabilityCounter: cardStabilityCounter,
+    } = useCardDetection({
+        videoElement: step.type === 'card' ? videoElement : null,
+        containerWidth,
+        containerHeight,
+        expectedFrameWidth: expectedCardWidth,
+        expectedFrameHeight: expectedCardHeight,
+        sizeTolerance: 0.20, // ±20% de tolérance sur la taille
+        positionTolerance: 40, // ±40px de tolérance sur la position
+    });
+
     // ⚡ FIX: Synchroniser le store si currentStep est invalide
     useEffect(() => {
         if (currentStep < 1) {
@@ -305,12 +333,20 @@ export function CalibrationWizard({
     // Confirmer l'étape actuelle
     const handleConfirm = () => {
         if (step.type === 'card') {
-            // Sauvegarder la calibration carte (même taille que le cadre affiché)
-            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.30 : containerWidth * 0.15;
+            // Utiliser la largeur de la carte détectée (plus précise) ou le cadre fixe
+            const cardWidth = detectedCard?.width || expectedCardWidth;
+
+            console.log('[Calibration] 📏 Carte détectée:', {
+                detectedWidth: detectedCard?.width?.toFixed(1),
+                expectedWidth: expectedCardWidth.toFixed(1),
+                usingWidth: cardWidth.toFixed(1),
+                distance: step.distance,
+            });
+
             if (step.distance === 'close') {
-                setCloseCardCalibration(fixedCardWidth);
+                setCloseCardCalibration(cardWidth);
             } else {
-                setFarCardCalibration(fixedCardWidth);
+                setFarCardCalibration(cardWidth);
             }
         } else {
             // Utiliser les landmarks capturés par MediaPipe
@@ -405,26 +441,70 @@ export function CalibrationWizard({
 
         if (step.type === 'card') {
             // Taille FIXE du cadre carte pour 20cm et 40cm
-            // Calibré pour que la carte rentre à la bonne distance
-            const fixedCardWidth = step.distance === 'close' ? containerWidth * 0.30 : containerWidth * 0.15;
-            const fixedCardHeight = fixedCardWidth / (CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM);
+            const fixedCardWidth = expectedCardWidth;
+            const fixedCardHeight = expectedCardHeight;
+
+            // Déterminer la couleur du cadre selon l'état de détection
+            const getFrameColor = () => {
+                if (isCardAligned) return 'rgb(34, 197, 94)'; // green-500
+                if (detectedCard && detectedCard.confidence > 0.5) {
+                    return 'rgb(234, 179, 8)'; // yellow-500 (détecté, pas aligné)
+                }
+                return 'rgb(59, 130, 246)'; // blue-500 (en attente)
+            };
+
+            // Message de guidance
+            const getCardGuidance = () => {
+                if (isCardAligned) return null;
+                if (!detectedCard) return { text: 'Montrez votre carte bancaire', icon: <CreditCard className="w-5 h-5" /> };
+
+                // Vérifier les problèmes de taille
+                const sizeRatioW = detectedCard.width / fixedCardWidth;
+                const sizeRatioH = detectedCard.height / fixedCardHeight;
+
+                if (sizeRatioW < 0.8 || sizeRatioH < 0.8) {
+                    return { text: 'Rapprochez la carte', icon: <ZoomIn className="w-5 h-5" />, color: 'text-yellow-400' };
+                }
+                if (sizeRatioW > 1.2 || sizeRatioH > 1.2) {
+                    return { text: 'Éloignez la carte', icon: <ZoomOut className="w-5 h-5" />, color: 'text-yellow-400' };
+                }
+
+                // Vérifier la position
+                const frameCenterX = containerWidth / 2;
+                const frameCenterY = containerHeight / 2;
+                const offsetX = detectedCard.centerX - frameCenterX;
+                const offsetY = detectedCard.centerY - frameCenterY;
+
+                if (Math.abs(offsetX) > 40 || Math.abs(offsetY) > 40) {
+                    return { text: 'Centrez la carte', icon: <MoveHorizontal className="w-5 h-5" />, color: 'text-yellow-400' };
+                }
+
+                return { text: 'Maintenez la position...', icon: <Loader2 className="w-5 h-5 animate-spin" />, color: 'text-yellow-400' };
+            };
+
+            const guidance = getCardGuidance();
+            const frameColor = getFrameColor();
 
             return (
                 <div className="relative w-full h-full flex flex-col">
-                    {/* Zone centrale - cadre de la carte FIXE */}
-                    <div className="flex-1 flex items-center justify-center">
+                    {/* Zone centrale - cadre de la carte avec détection */}
+                    <div className="flex-1 flex items-center justify-center relative">
+                        {/* Cadre cible */}
                         <div
-                            className="border-2 border-blue-500 bg-blue-500/20 shadow-[0_0_30px_rgba(59,130,246,0.5)] relative rounded-lg"
+                            className="border-2 relative rounded-lg transition-all duration-300"
                             style={{
                                 width: fixedCardWidth,
                                 height: fixedCardHeight,
+                                borderColor: frameColor,
+                                backgroundColor: isCardAligned ? 'rgba(34, 197, 94, 0.2)' : 'rgba(59, 130, 246, 0.1)',
+                                boxShadow: `0 0 30px ${frameColor}40`,
                             }}
                         >
                             {/* Coins décoratifs */}
-                            <div className="absolute -top-1 -left-1 w-5 h-5 border-t-2 border-l-2 border-blue-400 rounded-tl" />
-                            <div className="absolute -top-1 -right-1 w-5 h-5 border-t-2 border-r-2 border-blue-400 rounded-tr" />
-                            <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-2 border-l-2 border-blue-400 rounded-bl" />
-                            <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-2 border-r-2 border-blue-400 rounded-br" />
+                            <div className="absolute -top-1 -left-1 w-5 h-5 border-t-2 border-l-2 rounded-tl transition-colors duration-300" style={{ borderColor: frameColor }} />
+                            <div className="absolute -top-1 -right-1 w-5 h-5 border-t-2 border-r-2 rounded-tr transition-colors duration-300" style={{ borderColor: frameColor }} />
+                            <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-2 border-l-2 rounded-bl transition-colors duration-300" style={{ borderColor: frameColor }} />
+                            <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-2 border-r-2 rounded-br transition-colors duration-300" style={{ borderColor: frameColor }} />
 
                             {/* Label dimensions */}
                             <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-cyan-400">
@@ -433,16 +513,71 @@ export function CalibrationWizard({
                             <div className="absolute top-1/2 -right-14 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-cyan-400">
                                 {CREDIT_CARD_HEIGHT_MM.toFixed(0)} mm
                             </div>
+
+                            {/* Checkmark quand aligné */}
+                            {isCardAligned && (
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="bg-green-500 rounded-full p-3">
+                                        <Check className="w-8 h-8 text-white" />
+                                    </div>
+                                </div>
+                            )}
                         </div>
+
+                        {/* Contour de la carte détectée (overlay) */}
+                        {detectedCard && !isCardAligned && (
+                            <div
+                                className="absolute border-2 border-dashed border-yellow-500 rounded-lg pointer-events-none transition-all duration-100"
+                                style={{
+                                    left: detectedCard.x,
+                                    top: detectedCard.y,
+                                    width: detectedCard.width,
+                                    height: detectedCard.height,
+                                }}
+                            />
+                        )}
+
+                        {/* Indicateur d'état au-dessus */}
+                        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/80 px-4 py-2 rounded-lg">
+                            {isCardAligned ? (
+                                <div className="flex items-center gap-2">
+                                    <Check className="w-5 h-5 text-green-500" />
+                                    <span className="text-green-400 text-sm">Carte détectée!</span>
+                                </div>
+                            ) : guidance ? (
+                                <div className="flex items-center gap-2">
+                                    <span className={guidance.color || 'text-gray-400'}>{guidance.icon}</span>
+                                    <span className={`text-sm ${guidance.color || 'text-gray-400'}`}>{guidance.text}</span>
+                                </div>
+                            ) : null}
+                        </div>
+
+                        {/* Barre de progression de stabilité */}
+                        {detectedCard && !isCardAligned && (
+                            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-48">
+                                <div className="bg-gray-700 rounded-full h-2 overflow-hidden">
+                                    <div
+                                        className="bg-green-500 h-full transition-all duration-100"
+                                        style={{ width: `${(cardStabilityCounter / 15) * 100}%` }}
+                                    />
+                                </div>
+                                <p className="text-xs text-center text-gray-400 mt-1">
+                                    Maintenez la position...
+                                </p>
+                            </div>
+                        )}
                     </div>
 
-                    {/* Instruction en bas (pas de slider) */}
+                    {/* Instruction en bas */}
                     <div className="bg-black/70 p-4 rounded-t-lg text-center">
                         <p className="text-gray-300">
                             {step.distance === 'close'
                                 ? "Placez votre carte dans le cadre à ~20cm"
                                 : "Reculez à ~40cm et placez la carte dans le cadre"
                             }
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                            La carte sera détectée automatiquement
                         </p>
                     </div>
                 </div>
@@ -638,27 +773,37 @@ export function CalibrationWizard({
                 </div>
 
                 {/* Bouton confirmer */}
-                <Button
-                    onClick={handleConfirm}
-                    disabled={step.type === 'hand' && !isHandAtCorrectDistance}
-                    className={`w-full py-5 text-lg ${
-                        step.type === 'hand' && !isHandAtCorrectDistance
-                            ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                            : 'bg-green-600 hover:bg-green-700 text-white'
-                    }`}
-                >
-                    {step.type === 'hand' && !isHandAtCorrectDistance ? (
-                        <>
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                            En attente de détection...
-                        </>
-                    ) : (
-                        <>
-                            Confirmer
-                            <ChevronRight className="ml-2 h-5 w-5" />
-                        </>
-                    )}
-                </Button>
+                {(() => {
+                    const isDisabled = (step.type === 'hand' && !isHandAtCorrectDistance) ||
+                                       (step.type === 'card' && !isCardAligned);
+                    const waitingMessage = step.type === 'card'
+                        ? 'En attente de la carte...'
+                        : 'En attente de la main...';
+
+                    return (
+                        <Button
+                            onClick={handleConfirm}
+                            disabled={isDisabled}
+                            className={`w-full py-5 text-lg ${
+                                isDisabled
+                                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                                    : 'bg-green-600 hover:bg-green-700 text-white'
+                            }`}
+                        >
+                            {isDisabled ? (
+                                <>
+                                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                    {waitingMessage}
+                                </>
+                            ) : (
+                                <>
+                                    Confirmer
+                                    <ChevronRight className="ml-2 h-5 w-5" />
+                                </>
+                            )}
+                        </Button>
+                    );
+                })()}
             </div>
         </div>
     );
