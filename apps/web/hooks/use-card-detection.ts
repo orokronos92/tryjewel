@@ -286,11 +286,17 @@ export function useCardDetection({
             return;
         }
 
-        // Find the best candidate (largest one closest to center)
+        // Find the best candidate - must be close to center and reasonable size
         const centerX = width / 2;
         const centerY = height / 2;
 
-        let bestRect = creditCardRects[0];
+        // Expected card size in video coordinates (reverse the container scaling)
+        const expectedWidthInVideo = expectedFrameWidth * (width / containerWidth);
+        const expectedHeightInVideo = expectedFrameHeight * (height / containerHeight);
+        const minExpectedWidth = expectedWidthInVideo * 0.5;
+        const maxExpectedWidth = expectedWidthInVideo * 2.0;
+
+        let bestRect: BoundingBox | null = null;
         let bestScore = -Infinity;
 
         for (const rect of creditCardRects) {
@@ -299,19 +305,39 @@ export function useCardDetection({
             const rectCenterX = rect.minX + rectWidth / 2;
             const rectCenterY = rect.minY + rectHeight / 2;
 
-            const area = rectWidth * rectHeight;
+            // Filter by size - must be within reasonable range of expected size
+            if (rectWidth < minExpectedWidth || rectWidth > maxExpectedWidth) {
+                continue;
+            }
+
+            // Filter by position - must be in the center region (middle 60% of the screen)
+            const centerRegionX = width * 0.2;
+            const centerRegionY = height * 0.2;
+            if (rectCenterX < centerRegionX || rectCenterX > width - centerRegionX ||
+                rectCenterY < centerRegionY || rectCenterY > height - centerRegionY) {
+                continue;
+            }
+
             const distToCenter = Math.sqrt(
                 Math.pow(rectCenterX - centerX, 2) +
                 Math.pow(rectCenterY - centerY, 2)
             );
 
-            // Score: larger area, closer to center
-            const score = area - distToCenter * 10;
+            // Score: prioritize center proximity heavily, then size match
+            const sizeDiff = Math.abs(rectWidth - expectedWidthInVideo) / expectedWidthInVideo;
+            const score = 1000 - distToCenter - sizeDiff * 500;
 
             if (score > bestScore) {
                 bestScore = score;
                 bestRect = rect;
             }
+        }
+
+        if (!bestRect) {
+            setDetectedCard(null);
+            setStabilityCounter(0);
+            lastAlignedRef.current = false;
+            return;
         }
 
         // Convert to container coordinates
