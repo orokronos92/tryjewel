@@ -74,6 +74,16 @@ interface CalibrationState {
     // Facteur d'échelle pour le squelette 3D
     skeletonScaleFactor: number;
 
+    // Dimensions vidéo pour calcul FOV
+    videoDimensions: { width: number; height: number } | null;
+
+    // FOV calculé (en degrés)
+    calculatedFOV: {
+        horizontal: number;
+        vertical: number;
+        focalLengthPx: number;
+    } | null;
+
     // État
     isCalibrated: boolean;
     isCalibrating: boolean;
@@ -84,6 +94,7 @@ interface CalibrationState {
     setCloseHandMeasurements: (measurements: HandMeasurements) => void;
     setFarCardCalibration: (cardWidthPx: number) => void;
     setFarHandMeasurements: (measurements: HandMeasurements) => void;
+    setVideoDimensions: (width: number, height: number) => void;
     completeCalibration: () => void;
     resetCalibration: () => void;
     setIsCalibrating: (value: boolean) => void;
@@ -160,6 +171,8 @@ export const useCalibrationStore = create<CalibrationState>()(
                 pinky: null,
             },
             skeletonScaleFactor: 1.0,
+            videoDimensions: null,
+            calculatedFOV: null,
             isCalibrated: false,
             isCalibrating: false,
 
@@ -204,6 +217,10 @@ export const useCalibrationStore = create<CalibrationState>()(
                     },
                 });
             },
+
+            setVideoDimensions: (width, height) => set({
+                videoDimensions: { width, height },
+            }),
 
             completeCalibration: () => {
                 const { closeDistance, farDistance } = get();
@@ -269,6 +286,9 @@ export const useCalibrationStore = create<CalibrationState>()(
                 console.log('[Z-Calibration] 📐 CALCUL DE PROFONDEUR');
                 console.log('═══════════════════════════════════════════════════════════');
 
+                // Calcul du FOV à partir de la focal length
+                let fovData: { horizontal: number; vertical: number; focalLengthPx: number } | null = null;
+
                 if (closeDistance && farDistance) {
                     const focalClose = (closeDistance.cardWidthPx * CLOSE_DISTANCE_MM) / CREDIT_CARD_WIDTH_MM;
                     const focalFar = (farDistance.cardWidthPx * FAR_DISTANCE_MM) / CREDIT_CARD_WIDTH_MM;
@@ -296,6 +316,30 @@ export const useCalibrationStore = create<CalibrationState>()(
                     });
 
                     console.log('[Z-Calibration] 🎯 Focal length moyenne:', focalAvg.toFixed(1), 'pixels');
+
+                    // Calculer le FOV si on a les dimensions vidéo
+                    const videoDims = get().videoDimensions;
+                    if (videoDims && focalAvg > 0) {
+                        // FOV = 2 * atan((dimension / 2) / focalLength) * (180 / PI)
+                        const fovHorizontal = 2 * Math.atan((videoDims.width / 2) / focalAvg) * (180 / Math.PI);
+                        const fovVertical = 2 * Math.atan((videoDims.height / 2) / focalAvg) * (180 / Math.PI);
+
+                        fovData = {
+                            horizontal: Math.round(fovHorizontal * 10) / 10,
+                            vertical: Math.round(fovVertical * 10) / 10,
+                            focalLengthPx: Math.round(focalAvg),
+                        };
+
+                        console.log('═══════════════════════════════════════════════════════════');
+                        console.log('[FOV-Calibration] 📷 CALCUL DU CHAMP DE VISION');
+                        console.log('═══════════════════════════════════════════════════════════');
+                        console.log('[FOV-Calibration] Video dimensions:', `${videoDims.width}x${videoDims.height}`);
+                        console.log('[FOV-Calibration] Focal length:', focalAvg.toFixed(1), 'px');
+                        console.log('[FOV-Calibration] 🎯 FOV Horizontal:', fovData.horizontal.toFixed(1), '°');
+                        console.log('[FOV-Calibration] 🎯 FOV Vertical:', fovData.vertical.toFixed(1), '°');
+                    } else {
+                        console.warn('[FOV-Calibration] ⚠️ Dimensions vidéo non disponibles pour calcul FOV');
+                    }
                 }
 
                 console.log('═══════════════════════════════════════════════════════════');
@@ -303,6 +347,7 @@ export const useCalibrationStore = create<CalibrationState>()(
                 set({
                     finalFingerSizes: finalSizes,
                     skeletonScaleFactor: scaleFactor,
+                    calculatedFOV: fovData,
                     isCalibrated: true,
                     isCalibrating: false,
                     currentStep: 5,
@@ -322,6 +367,8 @@ export const useCalibrationStore = create<CalibrationState>()(
                     pinky: null,
                 },
                 skeletonScaleFactor: 1.0,
+                videoDimensions: null,
+                calculatedFOV: null,
                 isCalibrated: false,
                 isCalibrating: false,
             }),

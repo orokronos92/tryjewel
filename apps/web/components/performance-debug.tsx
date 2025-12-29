@@ -34,6 +34,7 @@ import {
     FPSTracker,
     TIER_CONFIGS,
 } from '@/lib/adaptive-performance';
+import { useCalibrationStore } from '@/stores/calibration-store';
 
 // =============================================================================
 // TYPES
@@ -63,7 +64,11 @@ export function PerformanceDebug({
     const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
     const [selectedTier, setSelectedTier] = useState<PerformanceTier>(2);
     const [isInitialized, setIsInitialized] = useState(false);
-    
+
+    // Calibration FOV
+    const calculatedFOV = useCalibrationStore((state) => state.calculatedFOV);
+    const isCalibrated = useCalibrationStore((state) => state.isCalibrated);
+
     // Refs
     const fpsTrackerRef = useRef<FPSTracker | null>(null);
     const animationFrameRef = useRef<number | null>(null);
@@ -224,7 +229,26 @@ export function PerformanceDebug({
                             <div className="text-blue-200/50">Measuring...</div>
                         )}
                     </Section>
-                    
+
+                    {/* Section: Camera FOV (from calibration) */}
+                    <Section title="📷 Camera FOV">
+                        {isCalibrated && calculatedFOV ? (
+                            <div className="space-y-1">
+                                <Row label="Horizontal" value={
+                                    <FovBadge fov={calculatedFOV.horizontal} />
+                                } />
+                                <Row label="Vertical" value={
+                                    <FovBadge fov={calculatedFOV.vertical} />
+                                } />
+                                <Row label="Focal Length" value={`${calculatedFOV.focalLengthPx} px`} />
+                            </div>
+                        ) : (
+                            <div className="text-blue-200/50">
+                                {isCalibrated ? 'No FOV data' : 'Not calibrated'}
+                            </div>
+                        )}
+                    </Section>
+
                     {/* Section: Tier Selection */}
                     <Section title="🎚️ Performance Tier">
                         <div className="flex gap-1 mb-2">
@@ -372,7 +396,7 @@ function GpuBadge({ tier }: { tier: 'low' | 'mid' | 'high' | 'unknown' }) {
 function FpsBadge({ fps }: { fps: number }) {
     let color = 'text-green-400';
     let icon = '🟢';
-    
+
     if (fps < 20) {
         color = 'text-red-400';
         icon = '🔴';
@@ -380,10 +404,30 @@ function FpsBadge({ fps }: { fps: number }) {
         color = 'text-yellow-400';
         icon = '🟡';
     }
-    
+
     return (
         <span className={`${color} font-bold`}>
             {icon} {fps} FPS
+        </span>
+    );
+}
+
+function FovBadge({ fov }: { fov: number }) {
+    // Typical webcam FOV ranges: 50-80° is normal, <50° is narrow, >80° is wide
+    let color = 'text-green-400';
+    let status = 'normal';
+
+    if (fov < 45) {
+        color = 'text-orange-400';
+        status = 'étroit';
+    } else if (fov > 90) {
+        color = 'text-yellow-400';
+        status = 'large';
+    }
+
+    return (
+        <span className={color}>
+            {fov.toFixed(1)}° <span className="text-blue-200/50">({status})</span>
         </span>
     );
 }

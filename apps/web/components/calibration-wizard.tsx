@@ -106,6 +106,7 @@ export function CalibrationWizard({
         setCloseHandMeasurements,
         setFarCardCalibration,
         setFarHandMeasurements,
+        setVideoDimensions,
         completeCalibration,
     } = useCalibrationStore();
 
@@ -214,6 +215,14 @@ export function CalibrationWizard({
             setCurrentStep(1);
         }
     }, [currentStep, setCurrentStep]);
+
+    // 📷 Stocker les dimensions vidéo pour le calcul du FOV
+    useEffect(() => {
+        if (videoElement && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+            setVideoDimensions(videoElement.videoWidth, videoElement.videoHeight);
+            console.log('[Calibration] 📹 Dimensions vidéo enregistrées:', `${videoElement.videoWidth}x${videoElement.videoHeight}`);
+        }
+    }, [videoElement, setVideoDimensions]);
 
     // Récupérer le pixelsPerMm de la carte pour cette distance
     const currentPixelsPerMm = step.distance === 'close'
