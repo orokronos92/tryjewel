@@ -14,7 +14,7 @@ export interface DetectedCard {
     aspectRatio: number;
     confidence: number;
     isAligned: boolean;
-    corners?: [number, number][];
+    corners: [number, number][];
 }
 
 interface UseCardDetectionOptions {
@@ -45,11 +45,204 @@ interface UseCardDetectionResult {
 const CREDIT_CARD_ASPECT_RATIO = 85.6 / 53.98; // ~1.586
 const STABILITY_THRESHOLD = 15;
 const DETECTION_INTERVAL = 100;
-const CANNY_LOW = 30;
-const CANNY_HIGH = 90;
+const DOWNSCALE_WIDTH = 256; // Process at low resolution for speed
 
 // =============================================================================
-// IMAGE PROCESSING
+// LIGHTWEIGHT CARD DETECTION (Sobel + Histogram peaks)
+// =============================================================================
+
+type Pt = { x: number; y: number };
+type CardQuad = [Pt, Pt, Pt, Pt]; // TL, TR, BR, BL
+
+function dist(a: Pt, b: Pt) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+function orderCorners(pts: Pt[]): CardQuad {
+    const sum = pts.map(p => p.x + p.y);
+    const diff = pts.map(p => p.x - p.y);
+    const tl = pts[sum.indexOf(Math.min(...sum))];
+    const br = pts[sum.indexOf(Math.max(...sum))];
+    const tr = pts[diff.indexOf(Math.max(...diff))];
+    const bl = pts[diff.indexOf(Math.min(...diff))];
+    return [tl, tr, br, bl];
+}
+
+function quadRatio(q: CardQuad) {
+    const [tl, tr, br, bl] = q;
+    const w = (dist(tl, tr) + dist(bl, br)) * 0.5;
+    const h = (dist(tl, bl) + dist(tr, br)) * 0.5;
+    return w / (h || 1);
+}
+
+function quadArea(q: CardQuad) {
+    const [tl, tr, br, bl] = q;
+    const w = (dist(tl, tr) + dist(bl, br)) * 0.5;
+    const h = (dist(tl, bl) + dist(tr, br)) * 0.5;
+    return w * h;
+}
+
+/**
+ * Downscale frame to small grayscale buffer
+ */
+function downscaleGray(
+    srcCanvas: HTMLCanvasElement,
+    targetW: number
+): { gray: Uint8Array; w: number; h: number; scale: number } {
+    const sw = srcCanvas.width;
+    const sh = srcCanvas.height;
+    const scale = targetW / sw;
+    const tw = targetW;
+    const th = Math.max(1, Math.round(sh * scale));
+
+    const tmp = document.createElement("canvas");
+    tmp.width = tw;
+    tmp.height = th;
+    const tctx = tmp.getContext("2d", { willReadFrequently: true })!;
+    tctx.drawImage(srcCanvas, 0, 0, tw, th);
+
+    const img = tctx.getImageData(0, 0, tw, th).data;
+    const gray = new Uint8Array(tw * th);
+    for (let i = 0; i < tw * th; i++) {
+        const r = img[i * 4 + 0];
+        const g = img[i * 4 + 1];
+        const b = img[i * 4 + 2];
+        gray[i] = (0.299 * r + 0.587 * g + 0.114 * b) | 0;
+    }
+    return { gray, w: tw, h: th, scale };
+}
+
+/**
+ * Sobel magnitude (edges)
+ */
+function sobelMag(gray: Uint8Array, w: number, h: number): Uint16Array {
+    const out = new Uint16Array(w * h);
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            const i = y * w + x;
+
+            const a00 = gray[i - w - 1], a01 = gray[i - w], a02 = gray[i - w + 1];
+            const a10 = gray[i - 1], a12 = gray[i + 1];
+            const a20 = gray[i + w - 1], a21 = gray[i + w], a22 = gray[i + w + 1];
+
+            const gx = (-a00 + a02) + (-2 * a10 + 2 * a12) + (-a20 + a22);
+            const gy = (-a00 - 2 * a01 - a02) + (a20 + 2 * a21 + a22);
+
+            out[i] = Math.min(65535, Math.abs(gx) + Math.abs(gy));
+        }
+    }
+    return out;
+}
+
+/**
+ * Threshold to binary edge map
+ */
+function thresholdEdges(mag: Uint16Array, w: number, h: number): Uint8Array {
+    let max = 0;
+    for (let i = 0; i < mag.length; i++) max = Math.max(max, mag[i]);
+    const thr = Math.max(40, Math.round(max * 0.25));
+    const out = new Uint8Array(w * h);
+    for (let i = 0; i < mag.length; i++) out[i] = mag[i] > thr ? 1 : 0;
+    return out;
+}
+
+/**
+ * Pick two strongest peaks in histogram with minimum gap
+ */
+function pickTwoPeaks(hist: Uint32Array, minGap: number): [number, number] | null {
+    let best1 = -1, best2 = -1;
+
+    // Find first peak
+    for (let i = 0; i < hist.length; i++) {
+        if (best1 === -1 || hist[i] > hist[best1]) best1 = i;
+    }
+    if (best1 === -1) return null;
+
+    // Find second peak with minimum gap
+    for (let i = 0; i < hist.length; i++) {
+        if (Math.abs(i - best1) < minGap) continue;
+        if (best2 === -1 || hist[i] > hist[best2]) best2 = i;
+    }
+    if (best2 === -1) return null;
+
+    return best1 < best2 ? [best1, best2] : [best2, best1];
+}
+
+interface DetectionResult {
+    quad: CardQuad | null;
+    edges: Uint8Array;
+    w: number;
+    h: number;
+    histX: Uint32Array;
+    histY: Uint32Array;
+    vLines: [number, number] | null;
+    hLines: [number, number] | null;
+}
+
+/**
+ * Main detection function: Sobel + Histogram peaks
+ */
+function detectCardQuadLite(
+    srcCanvas: HTMLCanvasElement,
+    targetW: number = DOWNSCALE_WIDTH
+): DetectionResult {
+    const { gray, w, h, scale } = downscaleGray(srcCanvas, targetW);
+    const mag = sobelMag(gray, w, h);
+    const edges = thresholdEdges(mag, w, h);
+
+    // Build histograms for vertical and horizontal lines
+    const histX = new Uint32Array(w);
+    const histY = new Uint32Array(h);
+
+    for (let y = 0; y < h; y++) {
+        const row = y * w;
+        for (let x = 0; x < w; x++) {
+            if (edges[row + x]) {
+                histX[x] += 1;
+                histY[y] += 1;
+            }
+        }
+    }
+
+    // Pick two vertical borders and two horizontal borders
+    const vLines = pickTwoPeaks(histX, Math.round(w * 0.15));
+    const hLines = pickTwoPeaks(histY, Math.round(h * 0.15));
+
+    if (!vLines || !hLines) {
+        return { quad: null, edges, w, h, histX, histY, vLines, hLines };
+    }
+
+    const [xL, xR] = vLines;
+    const [yT, yB] = hLines;
+
+    // Form quad in small space
+    const quadSmall: CardQuad = orderCorners([
+        { x: xL, y: yT },
+        { x: xR, y: yT },
+        { x: xR, y: yB },
+        { x: xL, y: yB },
+    ]) as CardQuad;
+
+    // Ratio check
+    const r = quadRatio(quadSmall);
+    const err = Math.abs(r - CREDIT_CARD_ASPECT_RATIO);
+    if (err > 0.6) {
+        console.log(`[CardDetection] Ratio mismatch: ${r.toFixed(2)} (expected ~1.59)`);
+        return { quad: null, edges, w, h, histX, histY, vLines, hLines };
+    }
+
+    // Upscale back to source canvas coordinates
+    const invScale = 1 / scale;
+    const quadSrc: CardQuad = quadSmall.map(p => ({
+        x: p.x * invScale,
+        y: p.y * invScale,
+    })) as CardQuad;
+
+    console.log(`[CardDetection] ✅ Card detected: ${(xR-xL)}x${(yB-yT)}px ratio=${r.toFixed(2)}`);
+
+    return { quad: quadSrc, edges, w, h, histX, histY, vLines, hLines };
+}
+
+// =============================================================================
+// VIDEO BOUNDS
 // =============================================================================
 
 function getVideoBounds(video: HTMLVideoElement, containerWidth: number, containerHeight: number) {
@@ -75,286 +268,13 @@ function getVideoBounds(video: HTMLVideoElement, containerWidth: number, contain
     return { x: offsetX, y: offsetY, width: displayWidth, height: displayHeight, scaleX: displayWidth / videoWidth, scaleY: displayHeight / videoHeight };
 }
 
-function toGrayscale(imageData: ImageData): Uint8Array {
-    const gray = new Uint8Array(imageData.width * imageData.height);
-    const data = imageData.data;
-    for (let i = 0; i < gray.length; i++) {
-        const idx = i * 4;
-        gray[i] = Math.round(0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
-    }
-    return gray;
-}
-
-function gaussianBlur(gray: Uint8Array, width: number, height: number): Uint8Array {
-    const kernel = [1, 4, 6, 4, 1, 4, 16, 24, 16, 4, 6, 24, 36, 24, 6, 4, 16, 24, 16, 4, 1, 4, 6, 4, 1];
-    const kernelSum = 256;
-    const result = new Uint8Array(width * height);
-    for (let y = 2; y < height - 2; y++) {
-        for (let x = 2; x < width - 2; x++) {
-            let sum = 0;
-            for (let ky = -2; ky <= 2; ky++) {
-                for (let kx = -2; kx <= 2; kx++) {
-                    sum += gray[(y + ky) * width + (x + kx)] * kernel[(ky + 2) * 5 + (kx + 2)];
-                }
-            }
-            result[y * width + x] = Math.round(sum / kernelSum);
-        }
-    }
-    return result;
-}
-
-function sobelGradients(gray: Uint8Array, width: number, height: number): { magnitude: Float32Array; direction: Float32Array } {
-    const magnitude = new Float32Array(width * height);
-    const direction = new Float32Array(width * height);
-    for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-            const gx = -gray[(y - 1) * width + (x - 1)] + gray[(y - 1) * width + (x + 1)]
-                     - 2 * gray[y * width + (x - 1)] + 2 * gray[y * width + (x + 1)]
-                     - gray[(y + 1) * width + (x - 1)] + gray[(y + 1) * width + (x + 1)];
-            const gy = -gray[(y - 1) * width + (x - 1)] - 2 * gray[(y - 1) * width + x] - gray[(y - 1) * width + (x + 1)]
-                     + gray[(y + 1) * width + (x - 1)] + 2 * gray[(y + 1) * width + x] + gray[(y + 1) * width + (x + 1)];
-            const idx = y * width + x;
-            magnitude[idx] = Math.sqrt(gx * gx + gy * gy);
-            direction[idx] = Math.atan2(gy, gx);
-        }
-    }
-    return { magnitude, direction };
-}
-
-function nonMaxSuppression(magnitude: Float32Array, direction: Float32Array, width: number, height: number): Float32Array {
-    const result = new Float32Array(width * height);
-    for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-            const idx = y * width + x;
-            const mag = magnitude[idx];
-            let angle = direction[idx] * 180 / Math.PI;
-            if (angle < 0) angle += 180;
-            let q = 255, r = 255;
-            if ((angle >= 0 && angle < 22.5) || (angle >= 157.5 && angle <= 180)) {
-                q = magnitude[y * width + (x + 1)];
-                r = magnitude[y * width + (x - 1)];
-            } else if (angle >= 22.5 && angle < 67.5) {
-                q = magnitude[(y - 1) * width + (x + 1)];
-                r = magnitude[(y + 1) * width + (x - 1)];
-            } else if (angle >= 67.5 && angle < 112.5) {
-                q = magnitude[(y - 1) * width + x];
-                r = magnitude[(y + 1) * width + x];
-            } else if (angle >= 112.5 && angle < 157.5) {
-                q = magnitude[(y - 1) * width + (x - 1)];
-                r = magnitude[(y + 1) * width + (x + 1)];
-            }
-            if (mag >= q && mag >= r) result[idx] = mag;
-        }
-    }
-    return result;
-}
-
-function hysteresis(nms: Float32Array, width: number, height: number, low: number, high: number): Uint8Array {
-    const edges = new Uint8Array(width * height);
-    for (let i = 0; i < nms.length; i++) {
-        if (nms[i] >= high) edges[i] = 255;
-        else if (nms[i] >= low) edges[i] = 128;
-    }
-    let changed = true;
-    while (changed) {
-        changed = false;
-        for (let y = 1; y < height - 1; y++) {
-            for (let x = 1; x < width - 1; x++) {
-                const idx = y * width + x;
-                if (edges[idx] === 128) {
-                    for (let dy = -1; dy <= 1; dy++) {
-                        for (let dx = -1; dx <= 1; dx++) {
-                            if (edges[(y + dy) * width + (x + dx)] === 255) {
-                                edges[idx] = 255;
-                                changed = true;
-                                break;
-                            }
-                        }
-                        if (edges[idx] === 255) break;
-                    }
-                }
-            }
-        }
-    }
-    for (let i = 0; i < edges.length; i++) {
-        if (edges[i] === 128) edges[i] = 0;
-    }
-    return edges;
-}
-
-// Morphological dilation to connect edge fragments
-function dilate(edges: Uint8Array, width: number, height: number, iterations: number = 2): Uint8Array {
-    let result = new Uint8Array(edges);
-    for (let iter = 0; iter < iterations; iter++) {
-        const temp = new Uint8Array(result);
-        for (let y = 1; y < height - 1; y++) {
-            for (let x = 1; x < width - 1; x++) {
-                if (result[y * width + x] === 255) continue;
-                // Check 3x3 neighborhood
-                let hasNeighbor = false;
-                for (let dy = -1; dy <= 1 && !hasNeighbor; dy++) {
-                    for (let dx = -1; dx <= 1 && !hasNeighbor; dx++) {
-                        if (result[(y + dy) * width + (x + dx)] === 255) {
-                            hasNeighbor = true;
-                        }
-                    }
-                }
-                if (hasNeighbor) temp[y * width + x] = 255;
-            }
-        }
-        result = temp;
-    }
-    return result;
-}
-
-function cannyEdgeDetection(imageData: ImageData): { edges: Uint8Array; width: number; height: number } {
-    const { width, height } = imageData;
-    const gray = toGrayscale(imageData);
-    const blurred = gaussianBlur(gray, width, height);
-    const { magnitude, direction } = sobelGradients(blurred, width, height);
-    const nms = nonMaxSuppression(magnitude, direction, width, height);
-    const edges = hysteresis(nms, width, height, CANNY_LOW, CANNY_HIGH);
-    // Dilate edges to connect fragments
-    const dilatedEdges = dilate(edges, width, height, 3);
-    return { edges: dilatedEdges, width, height };
-}
-
-// =============================================================================
-// RECTANGLE DETECTION - Using bounding box approach
-// =============================================================================
-
-interface RectangleCandidate {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-    area: number;
-    aspectRatio: number;
-    score: number;
-}
-
-function findRectangles(
-    edges: Uint8Array,
-    width: number,
-    height: number,
-    expectedWidth: number,
-    expectedHeight: number
-): { best: RectangleCandidate | null; candidates: RectangleCandidate[] } {
-    // Use connected component labeling to find regions
-    const labels = new Int32Array(width * height);
-    let currentLabel = 0;
-    const labelAreas: Map<number, { minX: number; maxX: number; minY: number; maxY: number; count: number }> = new Map();
-
-    // Simple flood-fill labeling
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const idx = y * width + x;
-            if (edges[idx] === 255 && labels[idx] === 0) {
-                currentLabel++;
-                const stack: [number, number][] = [[x, y]];
-                const bounds = { minX: x, maxX: x, minY: y, maxY: y, count: 0 };
-
-                while (stack.length > 0) {
-                    const [cx, cy] = stack.pop()!;
-                    const cidx = cy * width + cx;
-                    if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
-                    if (edges[cidx] !== 255 || labels[cidx] !== 0) continue;
-
-                    labels[cidx] = currentLabel;
-                    bounds.minX = Math.min(bounds.minX, cx);
-                    bounds.maxX = Math.max(bounds.maxX, cx);
-                    bounds.minY = Math.min(bounds.minY, cy);
-                    bounds.maxY = Math.max(bounds.maxY, cy);
-                    bounds.count++;
-
-                    // 8-connected
-                    stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
-                    stack.push([cx + 1, cy + 1], [cx - 1, cy - 1], [cx + 1, cy - 1], [cx - 1, cy + 1]);
-                }
-
-                labelAreas.set(currentLabel, bounds);
-            }
-        }
-    }
-
-    console.log(`[CardDetection] Found ${labelAreas.size} connected regions`);
-
-    // Find rectangular regions
-    const candidates: RectangleCandidate[] = [];
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const minArea = expectedWidth * expectedHeight * 0.1;
-    const maxArea = expectedWidth * expectedHeight * 4;
-
-    for (const [label, bounds] of labelAreas) {
-        const rectW = bounds.maxX - bounds.minX;
-        const rectH = bounds.maxY - bounds.minY;
-        const area = rectW * rectH;
-
-        // Skip too small or too large
-        if (area < minArea || area > maxArea) continue;
-        if (rectW < 30 || rectH < 20) continue;
-
-        const aspectRatio = rectW / rectH;
-
-        // Check if it looks like a card (aspect ratio 1.2 - 2.2)
-        if (aspectRatio < 1.0 || aspectRatio > 2.5) continue;
-
-        // Check if it's not too close to boundaries
-        if (bounds.minX < 5 || bounds.minY < 5 || bounds.maxX > width - 5 || bounds.maxY > height - 5) continue;
-
-        // Calculate score
-        const rectCenterX = bounds.minX + rectW / 2;
-        const rectCenterY = bounds.minY + rectH / 2;
-
-        const sizeMatchW = 1 - Math.min(1, Math.abs(rectW - expectedWidth) / expectedWidth);
-        const sizeMatchH = 1 - Math.min(1, Math.abs(rectH - expectedHeight) / expectedHeight);
-        const maxDist = Math.sqrt(centerX ** 2 + centerY ** 2);
-        const centerDist = Math.sqrt((rectCenterX - centerX) ** 2 + (rectCenterY - centerY) ** 2);
-        const centerScore = 1 - centerDist / maxDist;
-        const aspectMatch = 1 - Math.min(1, Math.abs(aspectRatio - CREDIT_CARD_ASPECT_RATIO) / CREDIT_CARD_ASPECT_RATIO);
-
-        // Rectangularity score (how filled is the bounding box)
-        const fillRatio = bounds.count / area;
-        const rectangularityScore = Math.min(1, fillRatio * 5); // Edge pixels should be ~20% of area for a rectangle
-
-        const score = sizeMatchW * 0.2 + sizeMatchH * 0.2 + centerScore * 0.2 + aspectMatch * 0.2 + rectangularityScore * 0.2;
-
-        candidates.push({
-            x: bounds.minX,
-            y: bounds.minY,
-            w: rectW,
-            h: rectH,
-            area,
-            aspectRatio,
-            score
-        });
-
-        console.log(`[CardDetection] Candidate: ${rectW}x${rectH} AR=${aspectRatio.toFixed(2)} score=${score.toFixed(2)}`);
-    }
-
-    if (candidates.length === 0) {
-        return { best: null, candidates: [] };
-    }
-
-    candidates.sort((a, b) => b.score - a.score);
-    const best = candidates[0];
-    console.log(`[CardDetection] 🎯 Best: ${best.w}x${best.h} AR=${best.aspectRatio.toFixed(2)} score=${best.score.toFixed(2)}`);
-
-    return { best, candidates };
-}
-
 // =============================================================================
 // DEBUG VISUALIZATION
 // =============================================================================
 
 function drawDebugVisualization(
     debugCanvas: HTMLCanvasElement,
-    edges: Uint8Array,
-    cropWidth: number,
-    cropHeight: number,
-    best: RectangleCandidate | null,
-    candidates: RectangleCandidate[],
+    result: DetectionResult,
     canvasDisplayWidth: number,
     canvasDisplayHeight: number
 ): void {
@@ -365,14 +285,14 @@ function drawDebugVisualization(
     debugCanvas.height = canvasDisplayHeight;
     ctx.clearRect(0, 0, canvasDisplayWidth, canvasDisplayHeight);
 
-    const scaleX = canvasDisplayWidth / cropWidth;
-    const scaleY = canvasDisplayHeight / cropHeight;
+    const scaleX = canvasDisplayWidth / result.w;
+    const scaleY = canvasDisplayHeight / result.h;
 
     // Draw edges in green
     const edgeImageData = ctx.createImageData(canvasDisplayWidth, canvasDisplayHeight);
-    for (let y = 0; y < cropHeight; y++) {
-        for (let x = 0; x < cropWidth; x++) {
-            if (edges[y * cropWidth + x] === 255) {
+    for (let y = 0; y < result.h; y++) {
+        for (let x = 0; x < result.w; x++) {
+            if (result.edges[y * result.w + x]) {
                 const cx = Math.floor(x * scaleX);
                 const cy = Math.floor(y * scaleY);
                 if (cx >= 0 && cx < canvasDisplayWidth && cy >= 0 && cy < canvasDisplayHeight) {
@@ -387,29 +307,59 @@ function drawDebugVisualization(
     }
     ctx.putImageData(edgeImageData, 0, 0);
 
-    // Draw all candidates in orange
-    for (const c of candidates) {
-        if (c === best) continue;
-        ctx.strokeStyle = 'orange';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(c.x * scaleX, c.y * scaleY, c.w * scaleX, c.h * scaleY);
+    // Draw detected vertical lines (blue)
+    if (result.vLines) {
+        ctx.strokeStyle = 'blue';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(result.vLines[0] * scaleX, 0);
+        ctx.lineTo(result.vLines[0] * scaleX, canvasDisplayHeight);
+        ctx.moveTo(result.vLines[1] * scaleX, 0);
+        ctx.lineTo(result.vLines[1] * scaleX, canvasDisplayHeight);
+        ctx.stroke();
     }
 
-    // Draw best in red
-    if (best) {
+    // Draw detected horizontal lines (blue)
+    if (result.hLines) {
+        ctx.strokeStyle = 'blue';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, result.hLines[0] * scaleY);
+        ctx.lineTo(canvasDisplayWidth, result.hLines[0] * scaleY);
+        ctx.moveTo(0, result.hLines[1] * scaleY);
+        ctx.lineTo(canvasDisplayWidth, result.hLines[1] * scaleY);
+        ctx.stroke();
+    }
+
+    // Draw quad in red if detected
+    if (result.quad) {
+        const invScaleX = result.w / canvasDisplayWidth;
+        const invScaleY = result.h / canvasDisplayHeight;
+
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 3;
-        ctx.strokeRect(best.x * scaleX, best.y * scaleY, best.w * scaleX, best.h * scaleY);
-
-        // Draw center cross
-        const cx = (best.x + best.w / 2) * scaleX;
-        const cy = (best.y + best.h / 2) * scaleY;
         ctx.beginPath();
-        ctx.moveTo(cx - 15, cy);
-        ctx.lineTo(cx + 15, cy);
-        ctx.moveTo(cx, cy - 15);
-        ctx.lineTo(cx, cy + 15);
+
+        // Scale quad back to debug canvas coordinates
+        const q = result.quad.map(p => ({
+            x: (p.x * invScaleX) * scaleX,
+            y: (p.y * invScaleY) * scaleY
+        }));
+
+        ctx.moveTo(q[0].x, q[0].y);
+        ctx.lineTo(q[1].x, q[1].y);
+        ctx.lineTo(q[2].x, q[2].y);
+        ctx.lineTo(q[3].x, q[3].y);
+        ctx.closePath();
         ctx.stroke();
+
+        // Draw corner points
+        ctx.fillStyle = 'yellow';
+        for (const p of q) {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
     }
 
     // Draw border
@@ -429,7 +379,6 @@ export function useCardDetection({
     expectedFrameWidth,
     expectedFrameHeight,
     sizeTolerance = 0.35,
-    positionTolerance = 50,
     debugCanvasRef,
 }: UseCardDetectionOptions): UseCardDetectionResult {
     const [detectedCard, setDetectedCard] = useState<DetectedCard | null>(null);
@@ -456,6 +405,7 @@ export function useCardDetection({
         const frameX = (containerWidth - expectedFrameWidth) / 2;
         const frameY = (containerHeight - expectedFrameHeight) / 2;
 
+        // Crop region with margin
         const margin = 0.2;
         const marginX = expectedFrameWidth * margin;
         const marginY = expectedFrameHeight * margin;
@@ -464,6 +414,7 @@ export function useCardDetection({
         const drawWidth = Math.min(expectedFrameWidth + marginX * 2, videoBounds.width);
         const drawHeight = Math.min(expectedFrameHeight + marginY * 2, videoBounds.height);
 
+        // Video source coordinates
         const videoX = Math.floor((drawX - videoBounds.x) / videoBounds.scaleX);
         const videoY = Math.floor((drawY - videoBounds.y) / videoBounds.scaleY);
         const videoW = Math.floor(drawWidth / videoBounds.scaleX);
@@ -476,27 +427,22 @@ export function useCardDetection({
 
         if (srcW <= 0 || srcH <= 0) return;
 
+        // Draw video frame to canvas
         canvasRef.current.width = srcW;
         canvasRef.current.height = srcH;
         ctxRef.current.drawImage(videoElement, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
 
-        const imageData = ctxRef.current.getImageData(0, 0, srcW, srcH);
-
-        // Run detection
-        const { edges, width, height } = cannyEdgeDetection(imageData);
-        const expectedWidthInCrop = srcW * (1 / 1.4);
-        const expectedHeightInCrop = srcH * (1 / 1.4);
-
-        const { best, candidates } = findRectangles(edges, width, height, expectedWidthInCrop, expectedHeightInCrop);
+        // Detect card
+        const result = detectCardQuadLite(canvasRef.current, DOWNSCALE_WIDTH);
 
         // Debug visualization
         if (debugCanvasRef?.current) {
             const canvasDisplayWidth = expectedFrameWidth * 1.4;
             const canvasDisplayHeight = expectedFrameHeight * 1.4;
-            drawDebugVisualization(debugCanvasRef.current, edges, width, height, best, candidates, canvasDisplayWidth, canvasDisplayHeight);
+            drawDebugVisualization(debugCanvasRef.current, result, canvasDisplayWidth, canvasDisplayHeight);
         }
 
-        if (!best) {
+        if (!result.quad) {
             setDetectedCard(null);
             stableCountRef.current = Math.max(stableCountRef.current - 2, 0);
             setStabilityCounter(stableCountRef.current);
@@ -504,18 +450,30 @@ export function useCardDetection({
             return;
         }
 
-        // Check alignment
-        const rectCenterX = best.x + best.w / 2;
-        const rectCenterY = best.y + best.h / 2;
-        const cropCenterX = width / 2;
-        const cropCenterY = height / 2;
+        // Calculate bounding box from quad
+        const xs = result.quad.map(p => p.x);
+        const ys = result.quad.map(p => p.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        const rectW = maxX - minX;
+        const rectH = maxY - minY;
 
-        const posToleranceCrop = Math.min(width, height) * 0.25;
+        // Check alignment
+        const expectedWidthInCrop = srcW * (1 / 1.4);
+        const expectedHeightInCrop = srcH * (1 / 1.4);
+        const cropCenterX = srcW / 2;
+        const cropCenterY = srcH / 2;
+        const rectCenterX = minX + rectW / 2;
+        const rectCenterY = minY + rectH / 2;
+
+        const posToleranceCrop = Math.min(srcW, srcH) * 0.25;
         const offsetX = Math.abs(rectCenterX - cropCenterX);
         const offsetY = Math.abs(rectCenterY - cropCenterY);
 
-        const sizeRatioW = best.w / expectedWidthInCrop;
-        const sizeRatioH = best.h / expectedHeightInCrop;
+        const sizeRatioW = rectW / expectedWidthInCrop;
+        const sizeRatioH = rectH / expectedHeightInCrop;
 
         const isSizeMatch = sizeRatioW >= (1 - sizeTolerance) && sizeRatioW <= (1 + sizeTolerance) &&
                             sizeRatioH >= (1 - sizeTolerance) && sizeRatioH <= (1 + sizeTolerance);
@@ -524,10 +482,16 @@ export function useCardDetection({
 
         // Convert to container coordinates
         const scaleToContainer = drawWidth / srcW;
-        const cardX = drawX + best.x * scaleToContainer;
-        const cardY = drawY + best.y * scaleToContainer;
-        const cardWidth = best.w * scaleToContainer;
-        const cardHeight = best.h * scaleToContainer;
+        const cardX = drawX + minX * scaleToContainer;
+        const cardY = drawY + minY * scaleToContainer;
+        const cardWidth = rectW * scaleToContainer;
+        const cardHeight = rectH * scaleToContainer;
+
+        // Convert corners to container coordinates
+        const containerCorners = result.quad.map(p => [
+            drawX + p.x * scaleToContainer,
+            drawY + p.y * scaleToContainer
+        ] as [number, number]);
 
         const card: DetectedCard = {
             x: cardX,
@@ -536,9 +500,10 @@ export function useCardDetection({
             height: cardHeight,
             centerX: cardX + cardWidth / 2,
             centerY: cardY + cardHeight / 2,
-            aspectRatio: best.aspectRatio,
-            confidence: best.score,
+            aspectRatio: rectW / rectH,
+            confidence: 0.8, // Fixed confidence for now
             isAligned,
+            corners: containerCorners,
         };
 
         setDetectedCard(card);
@@ -592,7 +557,7 @@ export function useCardDetection({
         isDetecting,
         isCardAligned,
         stabilityCounter,
-        isLoading: false, // No loading needed for custom implementation
+        isLoading: false,
         startDetection,
         stopDetection,
     };
