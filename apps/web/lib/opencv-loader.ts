@@ -98,8 +98,8 @@ export interface RotatedRect {
 let cvLoadPromise: Promise<OpenCVModule> | null = null;
 let cvInstance: OpenCVModule | null = null;
 
-// OpenCV.js CDN URL
-const OPENCV_CDN_URL = 'https://docs.opencv.org/4.9.0/opencv.js';
+// OpenCV.js CDN URL - using jsdelivr which has better browser compatibility
+const OPENCV_CDN_URL = 'https://cdn.jsdelivr.net/npm/opencv.js@1.2.1/opencv.js';
 
 // Timeout for loading (30 seconds)
 const LOAD_TIMEOUT = 30000;
