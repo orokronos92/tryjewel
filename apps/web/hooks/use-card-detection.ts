@@ -587,20 +587,53 @@ function findRectanglesFromContours(
         // Add to allQuads for visualization (before filtering)
         allQuads.push({ x: minX, y: minY, w: rectW, h: rectH, points: pts, score: 0 });
 
-        // IMPORTANT: Skip rectangles too close to the crop boundary (likely the boundary itself!)
-        if (minX < boundaryMargin || minY < boundaryMargin ||
-            maxX > width - boundaryMargin || maxY > height - boundaryMargin) {
-            continue;
-        }
+        // Calculate rejection reasons (with VERY relaxed thresholds for initial detection)
+        const nearBoundary = minX < boundaryMargin || minY < boundaryMargin ||
+            maxX > width - boundaryMargin || maxY > height - boundaryMargin;
 
-        // Skip if too small or too large
-        if (rectW < expectedWidth * 0.4 || rectW > expectedWidth * 1.6) continue;
-        if (rectH < expectedHeight * 0.4 || rectH > expectedHeight * 1.6) continue;
+        // VERY relaxed size filters - we just want to detect ANY credit-card-shaped rectangle
+        // Minimum: at least 15% of expected size (card held far away)
+        // Maximum: up to 3x expected size (card held very close or zoomed)
+        const minSizeFactor = 0.15;
+        const maxSizeFactor = 3.0;
+        const tooSmallW = rectW < expectedWidth * minSizeFactor;
+        const tooLargeW = rectW > expectedWidth * maxSizeFactor;
+        const tooSmallH = rectH < expectedHeight * minSizeFactor;
+        const tooLargeH = rectH > expectedHeight * maxSizeFactor;
 
-        // Check aspect ratio (relaxed)
+        // Also check minimum absolute size (reject tiny noise)
+        const tooTiny = rectW < 30 || rectH < 20;
+
         const aspectRatio = rectW / rectH;
         const ratioMatch = aspectRatio / CREDIT_CARD_ASPECT_RATIO;
-        if (ratioMatch < 0.6 || ratioMatch > 1.6) continue;
+        // Credit card ratio is ~1.586, accept anything from 1.0 to 2.5 aspect ratio
+        const badRatio = aspectRatio < 1.0 || aspectRatio > 2.5;
+
+        // Log ALL quads for debugging (limit to 15 to avoid spam)
+        if (allQuads.length <= 15) {
+            const reasons: string[] = [];
+            if (nearBoundary) reasons.push('boundary');
+            if (tooSmallW) reasons.push('smallW');
+            if (tooLargeW) reasons.push('largeW');
+            if (tooSmallH) reasons.push('smallH');
+            if (tooLargeH) reasons.push('largeH');
+            if (tooTiny) reasons.push('tiny');
+            if (badRatio) reasons.push('ratio');
+
+            console.log(`[CardDetection] Quad ${allQuads.length}: ${rectW.toFixed(0)}x${rectH.toFixed(0)} @ (${minX.toFixed(0)},${minY.toFixed(0)}) AR=${aspectRatio.toFixed(2)} ${reasons.length ? '❌ ' + reasons.join(',') : '✅ OK'}`);
+        }
+
+        // IMPORTANT: Skip rectangles too close to the crop boundary (likely the boundary itself!)
+        if (nearBoundary) continue;
+
+        // Skip tiny noise
+        if (tooTiny) continue;
+
+        // Skip if too small or too large
+        if (tooSmallW || tooLargeW || tooSmallH || tooLargeH) continue;
+
+        // Check aspect ratio
+        if (badRatio) continue;
 
         // Calculate scores
         const rectCenterX = minX + rectW / 2;
