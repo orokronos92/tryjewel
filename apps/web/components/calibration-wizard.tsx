@@ -224,11 +224,12 @@ export function CalibrationWizard({
         return expectedCardWidth / (CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM);
     }, [expectedCardWidth]);
 
-    // Hook de détection automatique de la carte
+    // Hook de détection automatique de la carte (avec OpenCV)
     const {
         detectedCard,
         isCardAligned,
         stabilityCounter: cardStabilityCounter,
+        isLoading: isOpenCVLoading,
     } = useCardDetection({
         videoElement: step.type === 'card' ? videoElement : null,
         containerWidth,
@@ -753,7 +754,9 @@ export function CalibrationWizard({
                     {step.icon}
                     Étape {currentStep}/4 : {step.title}
                 </h2>
-                <p className="text-sm text-gray-300 mt-1">{step.instruction}</p>
+                <p className="text-sm text-gray-300 mt-1">
+                    {isOpenCVLoading ? "Chargement du système de détection..." : step.instruction}
+                </p>
                 {/* Indicateurs de progression */}
                 <div className="mt-3">
                     {renderStepIndicators()}

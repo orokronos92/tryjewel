@@ -1,4 +1,5 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
+import { loadOpenCV, isOpenCVLoaded, type OpenCVModule, type Mat, type MatVector } from '../lib/opencv-loader';
 
 // =============================================================================
 // TYPES
@@ -19,6 +20,8 @@ export interface DetectedCard {
     confidence: number;
     // Is it matching the expected frame?
     isAligned: boolean;
+    // Corner points (for visualization)
+    corners?: [number, number][];
 }
 
 interface UseCardDetectionOptions {
@@ -40,6 +43,7 @@ interface UseCardDetectionResult {
     isDetecting: boolean;
     isCardAligned: boolean;
     stabilityCounter: number;
+    isLoading: boolean; // OpenCV loading state
     startDetection: () => void;
     stopDetection: () => void;
 }
@@ -51,18 +55,11 @@ interface UseCardDetectionResult {
 // Credit card aspect ratio (ISO 7810 ID-1)
 const CREDIT_CARD_ASPECT_RATIO = 85.6 / 53.98; // ~1.586
 
-// Tolerance for aspect ratio matching
-const ASPECT_RATIO_TOLERANCE = 0.25; // ±25%
-
 // Stability frames required for validation (15 frames @ 10fps = 1.5 sec)
 const STABILITY_THRESHOLD = 15;
 
 // Detection interval (ms)
 const DETECTION_INTERVAL = 100; // 10 FPS
-
-// Canny thresholds
-const CANNY_LOW = 30;
-const CANNY_HIGH = 100;
 
 // =============================================================================
 // VIDEO BOUNDS CALCULATION (for object-fit alignment)
@@ -120,405 +117,7 @@ function getVideoBounds(
 }
 
 // =============================================================================
-// FIND CONTOURS - Suzuki-Abe algorithm (from LingDong's implementation)
-// =============================================================================
-
-interface Contour {
-    points: [number, number][];
-    isHole: boolean;
-    id: number;
-    parent?: number;
-}
-
-const N_PIXEL_NEIGHBOR = 8;
-
-function neighborIDToIndex(i: number, j: number, id: number): [number, number] | null {
-    if (id === 0) return [i, j + 1];
-    if (id === 1) return [i - 1, j + 1];
-    if (id === 2) return [i - 1, j];
-    if (id === 3) return [i - 1, j - 1];
-    if (id === 4) return [i, j - 1];
-    if (id === 5) return [i + 1, j - 1];
-    if (id === 6) return [i + 1, j];
-    if (id === 7) return [i + 1, j + 1];
-    return null;
-}
-
-function neighborIndexToID(i0: number, j0: number, i: number, j: number): number {
-    const di = i - i0;
-    const dj = j - j0;
-    if (di === 0 && dj === 1) return 0;
-    if (di === -1 && dj === 1) return 1;
-    if (di === -1 && dj === 0) return 2;
-    if (di === -1 && dj === -1) return 3;
-    if (di === 0 && dj === -1) return 4;
-    if (di === 1 && dj === -1) return 5;
-    if (di === 1 && dj === 0) return 6;
-    if (di === 1 && dj === 1) return 7;
-    return -1;
-}
-
-function ccwNon0(F: Int32Array, w: number, h: number, i0: number, j0: number, i: number, j: number, offset: number): [number, number] | null {
-    const id = neighborIndexToID(i0, j0, i, j);
-    for (let k = 0; k < N_PIXEL_NEIGHBOR; k++) {
-        const kk = (k + id + offset + N_PIXEL_NEIGHBOR * 2) % N_PIXEL_NEIGHBOR;
-        const ij = neighborIDToIndex(i0, j0, kk);
-        if (ij && F[ij[0] * w + ij[1]] !== 0) {
-            return ij;
-        }
-    }
-    return null;
-}
-
-function cwNon0(F: Int32Array, w: number, h: number, i0: number, j0: number, i: number, j: number, offset: number): [number, number] | null {
-    const id = neighborIndexToID(i0, j0, i, j);
-    for (let k = 0; k < N_PIXEL_NEIGHBOR; k++) {
-        const kk = (-k + id - offset + N_PIXEL_NEIGHBOR * 2) % N_PIXEL_NEIGHBOR;
-        const ij = neighborIDToIndex(i0, j0, kk);
-        if (ij && F[ij[0] * w + ij[1]] !== 0) {
-            return ij;
-        }
-    }
-    return null;
-}
-
-function findContoursFromBinary(binaryImage: Uint8Array, w: number, h: number): Contour[] {
-    // Copy to Int32Array for the algorithm (it modifies the array)
-    const F = new Int32Array(w * h);
-    for (let i = 0; i < binaryImage.length; i++) {
-        F[i] = binaryImage[i] > 0 ? 1 : 0;
-    }
-
-    let nbd = 1;
-    let lnbd = 1;
-    const contours: Contour[] = [];
-
-    // Clear borders
-    for (let i = 1; i < h - 1; i++) {
-        F[i * w] = 0;
-        F[i * w + w - 1] = 0;
-    }
-    for (let i = 0; i < w; i++) {
-        F[i] = 0;
-        F[w * h - 1 - i] = 0;
-    }
-
-    for (let i = 1; i < h - 1; i++) {
-        lnbd = 1;
-        for (let j = 1; j < w - 1; j++) {
-            let i2 = 0, j2 = 0;
-
-            if (F[i * w + j] === 0) continue;
-
-            if (F[i * w + j] === 1 && F[i * w + (j - 1)] === 0) {
-                nbd++;
-                i2 = i;
-                j2 = j - 1;
-            } else if (F[i * w + j] >= 1 && F[i * w + j + 1] === 0) {
-                nbd++;
-                i2 = i;
-                j2 = j + 1;
-                if (F[i * w + j] > 1) {
-                    lnbd = F[i * w + j];
-                }
-            } else {
-                if (F[i * w + j] !== 1) lnbd = Math.abs(F[i * w + j]);
-                continue;
-            }
-
-            const B: Contour = {
-                points: [[j, i]],
-                isHole: j2 === j + 1,
-                id: nbd,
-            };
-            contours.push(B);
-
-            let B0: Contour | undefined;
-            for (const c of contours) {
-                if (c.id === lnbd) {
-                    B0 = c;
-                    break;
-                }
-            }
-
-            if (B0) {
-                if (B0.isHole) {
-                    B.parent = B.isHole ? B0.parent : lnbd;
-                } else {
-                    B.parent = B.isHole ? lnbd : B0.parent;
-                }
-            }
-
-            const i1j1 = cwNon0(F, w, h, i, j, i2, j2, 0);
-            if (!i1j1) {
-                F[i * w + j] = -nbd;
-                if (F[i * w + j] !== 1) lnbd = Math.abs(F[i * w + j]);
-                continue;
-            }
-
-            let i1 = i1j1[0], j1 = i1j1[1];
-            i2 = i1;
-            j2 = j1;
-            let i3 = i, j3 = j;
-
-            while (true) {
-                const i4j4 = ccwNon0(F, w, h, i3, j3, i2, j2, 1);
-                if (!i4j4) break;
-
-                const i4 = i4j4[0], j4 = i4j4[1];
-                contours[contours.length - 1].points.push([j4, i4]);
-
-                if (F[i3 * w + j3 + 1] === 0) {
-                    F[i3 * w + j3] = -nbd;
-                } else if (F[i3 * w + j3] === 1) {
-                    F[i3 * w + j3] = nbd;
-                }
-
-                if (i4 === i && j4 === j && i3 === i1 && j3 === j1) {
-                    if (F[i * w + j] !== 1) lnbd = Math.abs(F[i * w + j]);
-                    break;
-                } else {
-                    i2 = i3;
-                    j2 = j3;
-                    i3 = i4;
-                    j3 = j4;
-                }
-            }
-        }
-    }
-
-    return contours;
-}
-
-// =============================================================================
-// APPROX POLY DP - Douglas-Peucker algorithm
-// =============================================================================
-
-function pointDistanceToSegment(p: [number, number], p0: [number, number], p1: [number, number]): number {
-    const x = p[0], y = p[1];
-    const x1 = p0[0], y1 = p0[1];
-    const x2 = p1[0], y2 = p1[1];
-    const A = x - x1, B = y - y1, C = x2 - x1, D = y2 - y1;
-    const dot = A * C + B * D;
-    const len_sq = C * C + D * D;
-    let param = -1;
-    if (len_sq !== 0) param = dot / len_sq;
-
-    let xx: number, yy: number;
-    if (param < 0) {
-        xx = x1; yy = y1;
-    } else if (param > 1) {
-        xx = x2; yy = y2;
-    } else {
-        xx = x1 + param * C;
-        yy = y1 + param * D;
-    }
-
-    return Math.sqrt((x - xx) ** 2 + (y - yy) ** 2);
-}
-
-function approxPolyDP(polyline: [number, number][], epsilon: number): [number, number][] {
-    if (polyline.length <= 2) return polyline;
-
-    let dmax = 0;
-    let argmax = -1;
-
-    for (let i = 1; i < polyline.length - 1; i++) {
-        const d = pointDistanceToSegment(polyline[i], polyline[0], polyline[polyline.length - 1]);
-        if (d > dmax) {
-            dmax = d;
-            argmax = i;
-        }
-    }
-
-    if (dmax > epsilon) {
-        const L = approxPolyDP(polyline.slice(0, argmax + 1), epsilon);
-        const R = approxPolyDP(polyline.slice(argmax), epsilon);
-        return [...L.slice(0, -1), ...R];
-    } else {
-        return [[...polyline[0]] as [number, number], [...polyline[polyline.length - 1]] as [number, number]];
-    }
-}
-
-// =============================================================================
-// IMAGE PROCESSING - CANNY EDGE DETECTION
-// =============================================================================
-
-function getFrameRegionImageData(
-    video: HTMLVideoElement,
-    canvas: HTMLCanvasElement,
-    ctx: CanvasRenderingContext2D,
-    frameX: number,
-    frameY: number,
-    frameWidth: number,
-    frameHeight: number,
-    videoBounds: VideoBounds
-): ImageData | null {
-    if (!video.videoWidth || !video.videoHeight) return null;
-
-    const margin = 0.2;
-    const marginX = frameWidth * margin;
-    const marginY = frameHeight * margin;
-
-    const cropX = Math.max(0, frameX - marginX);
-    const cropY = Math.max(0, frameY - marginY);
-    const cropW = Math.min(frameWidth + marginX * 2, videoBounds.width - (cropX - videoBounds.x));
-    const cropH = Math.min(frameHeight + marginY * 2, videoBounds.height - (cropY - videoBounds.y));
-
-    const videoX = Math.floor((cropX - videoBounds.x) / videoBounds.scaleX);
-    const videoY = Math.floor((cropY - videoBounds.y) / videoBounds.scaleY);
-    const videoW = Math.floor(cropW / videoBounds.scaleX);
-    const videoH = Math.floor(cropH / videoBounds.scaleY);
-
-    const srcX = Math.max(0, Math.min(videoX, video.videoWidth - 1));
-    const srcY = Math.max(0, Math.min(videoY, video.videoHeight - 1));
-    const srcW = Math.min(videoW, video.videoWidth - srcX);
-    const srcH = Math.min(videoH, video.videoHeight - srcY);
-
-    if (srcW <= 0 || srcH <= 0) return null;
-
-    canvas.width = srcW;
-    canvas.height = srcH;
-    ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
-
-    return ctx.getImageData(0, 0, srcW, srcH);
-}
-
-function toGrayscale(imageData: ImageData): Float32Array {
-    const gray = new Float32Array(imageData.width * imageData.height);
-    const data = imageData.data;
-
-    for (let i = 0; i < gray.length; i++) {
-        const idx = i * 4;
-        gray[i] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-    }
-
-    return gray;
-}
-
-function gaussianBlur(gray: Float32Array, width: number, height: number): Float32Array {
-    const kernel = [1, 4, 6, 4, 1, 4, 16, 24, 16, 4, 6, 24, 36, 24, 6, 4, 16, 24, 16, 4, 1, 4, 6, 4, 1];
-    const kernelSum = 256;
-    const result = new Float32Array(width * height);
-
-    for (let y = 2; y < height - 2; y++) {
-        for (let x = 2; x < width - 2; x++) {
-            let sum = 0;
-            for (let ky = -2; ky <= 2; ky++) {
-                for (let kx = -2; kx <= 2; kx++) {
-                    sum += gray[(y + ky) * width + (x + kx)] * kernel[(ky + 2) * 5 + (kx + 2)];
-                }
-            }
-            result[y * width + x] = sum / kernelSum;
-        }
-    }
-
-    return result;
-}
-
-function sobelGradients(gray: Float32Array, width: number, height: number): { magnitude: Float32Array; direction: Float32Array } {
-    const magnitude = new Float32Array(width * height);
-    const direction = new Float32Array(width * height);
-
-    for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-            const gx = -gray[(y - 1) * width + (x - 1)] + gray[(y - 1) * width + (x + 1)]
-                     - 2 * gray[y * width + (x - 1)] + 2 * gray[y * width + (x + 1)]
-                     - gray[(y + 1) * width + (x - 1)] + gray[(y + 1) * width + (x + 1)];
-            const gy = -gray[(y - 1) * width + (x - 1)] - 2 * gray[(y - 1) * width + x] - gray[(y - 1) * width + (x + 1)]
-                     + gray[(y + 1) * width + (x - 1)] + 2 * gray[(y + 1) * width + x] + gray[(y + 1) * width + (x + 1)];
-
-            const idx = y * width + x;
-            magnitude[idx] = Math.sqrt(gx * gx + gy * gy);
-            direction[idx] = Math.atan2(gy, gx);
-        }
-    }
-
-    return { magnitude, direction };
-}
-
-function nonMaxSuppression(magnitude: Float32Array, direction: Float32Array, width: number, height: number): Float32Array {
-    const result = new Float32Array(width * height);
-
-    for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-            const idx = y * width + x;
-            const mag = magnitude[idx];
-            let angle = direction[idx] * 180 / Math.PI;
-            if (angle < 0) angle += 180;
-
-            let q = 255, r = 255;
-
-            if ((angle >= 0 && angle < 22.5) || (angle >= 157.5 && angle <= 180)) {
-                q = magnitude[y * width + (x + 1)];
-                r = magnitude[y * width + (x - 1)];
-            } else if (angle >= 22.5 && angle < 67.5) {
-                q = magnitude[(y - 1) * width + (x + 1)];
-                r = magnitude[(y + 1) * width + (x - 1)];
-            } else if (angle >= 67.5 && angle < 112.5) {
-                q = magnitude[(y - 1) * width + x];
-                r = magnitude[(y + 1) * width + x];
-            } else if (angle >= 112.5 && angle < 157.5) {
-                q = magnitude[(y - 1) * width + (x - 1)];
-                r = magnitude[(y + 1) * width + (x + 1)];
-            }
-
-            if (mag >= q && mag >= r) result[idx] = mag;
-        }
-    }
-
-    return result;
-}
-
-function hysteresis(nms: Float32Array, width: number, height: number, low: number, high: number): Uint8Array {
-    const edges = new Uint8Array(width * height);
-
-    for (let i = 0; i < nms.length; i++) {
-        if (nms[i] >= high) edges[i] = 255;
-        else if (nms[i] >= low) edges[i] = 128;
-    }
-
-    let changed = true;
-    while (changed) {
-        changed = false;
-        for (let y = 1; y < height - 1; y++) {
-            for (let x = 1; x < width - 1; x++) {
-                const idx = y * width + x;
-                if (edges[idx] === 128) {
-                    for (let dy = -1; dy <= 1; dy++) {
-                        for (let dx = -1; dx <= 1; dx++) {
-                            if (edges[(y + dy) * width + (x + dx)] === 255) {
-                                edges[idx] = 255;
-                                changed = true;
-                                break;
-                            }
-                        }
-                        if (edges[idx] === 255) break;
-                    }
-                }
-            }
-        }
-    }
-
-    for (let i = 0; i < edges.length; i++) {
-        if (edges[i] === 128) edges[i] = 0;
-    }
-
-    return edges;
-}
-
-function cannyEdgeDetection(imageData: ImageData): { edges: Uint8Array; width: number; height: number } {
-    const { width, height } = imageData;
-    const gray = toGrayscale(imageData);
-    const blurred = gaussianBlur(gray, width, height);
-    const { magnitude, direction } = sobelGradients(blurred, width, height);
-    const nms = nonMaxSuppression(magnitude, direction, width, height);
-    const edges = hysteresis(nms, width, height, CANNY_LOW, CANNY_HIGH);
-    return { edges, width, height };
-}
-
-// =============================================================================
-// RECTANGLE DETECTION FROM CONTOURS
+// OPENCV CARD DETECTION
 // =============================================================================
 
 interface RectangleCandidate {
@@ -526,153 +125,212 @@ interface RectangleCandidate {
     y: number;
     w: number;
     h: number;
-    points: [number, number][];
+    corners: [number, number][];
+    area: number;
+    aspectRatio: number;
     score: number;
 }
 
-interface FindRectanglesResult {
-    best: RectangleCandidate | null;
-    allQuads: RectangleCandidate[];  // All quadrilaterals found (before filtering)
+interface DetectionResult {
+    card: DetectedCard | null;
+    candidates: RectangleCandidate[];
+    bestCandidate: RectangleCandidate | null;
+    debugImage?: ImageData;
 }
 
-function findRectanglesFromContours(
-    contours: Contour[],
-    width: number,
-    height: number,
+function detectCardWithOpenCV(
+    cv: OpenCVModule,
+    imageData: ImageData,
     expectedWidth: number,
-    expectedHeight: number
-): FindRectanglesResult {
-    const allQuads: RectangleCandidate[] = [];  // All quads for debug visualization
-    const candidates: RectangleCandidate[] = [];
-    const centerX = width / 2;
-    const centerY = height / 2;
+    expectedHeight: number,
+    cropOffsetX: number,
+    cropOffsetY: number,
+    scaleToContainer: number
+): DetectionResult {
+    const result: DetectionResult = {
+        card: null,
+        candidates: [],
+        bestCandidate: null,
+    };
 
-    // Margin to reject rectangles too close to crop boundary
-    const boundaryMargin = 10;
+    // Create OpenCV Mat from ImageData
+    const src = cv.matFromImageData(imageData);
+    const gray = new cv.Mat();
+    const blurred = new cv.Mat();
+    const edges = new cv.Mat();
+    const dilated = new cv.Mat();
+    const hierarchy = new cv.Mat();
+    const contours = new cv.MatVector();
 
-    for (const contour of contours) {
-        // Skip small contours
-        if (contour.points.length < 20) continue;
+    try {
+        // Convert to grayscale
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
 
-        // Calculate perimeter for epsilon
-        let perimeter = 0;
-        for (let i = 0; i < contour.points.length; i++) {
-            const p1 = contour.points[i];
-            const p2 = contour.points[(i + 1) % contour.points.length];
-            perimeter += Math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2);
+        // Apply Gaussian blur to reduce noise
+        cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
+
+        // Apply Canny edge detection
+        cv.Canny(blurred, edges, 50, 150);
+
+        // Dilate edges to close gaps
+        const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+        cv.dilate(edges, dilated, kernel);
+        kernel.delete();
+
+        // Find contours
+        cv.findContours(dilated, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+        const centerX = imageData.width / 2;
+        const centerY = imageData.height / 2;
+        const minArea = expectedWidth * expectedHeight * 0.1; // At least 10% of expected area
+        const maxArea = expectedWidth * expectedHeight * 4;   // At most 400% of expected area
+
+        console.log(`[CardDetection] OpenCV: ${contours.size()} contours, expected: ${expectedWidth.toFixed(0)}x${expectedHeight.toFixed(0)}`);
+
+        // Process each contour
+        for (let i = 0; i < contours.size(); i++) {
+            const contour = contours.get(i);
+            const area = cv.contourArea(contour);
+
+            // Skip small contours
+            if (area < minArea || area > maxArea) {
+                contour.delete();
+                continue;
+            }
+
+            // Approximate polygon
+            const perimeter = cv.arcLength(contour, true);
+            const epsilon = 0.02 * perimeter;
+            const approx = new cv.Mat();
+            cv.approxPolyDP(contour, approx, epsilon, true);
+
+            // We want quadrilaterals (4 corners)
+            if (approx.rows === 4) {
+                // Extract corner points
+                const corners: [number, number][] = [];
+                for (let j = 0; j < 4; j++) {
+                    const x = approx.data32S[j * 2];
+                    const y = approx.data32S[j * 2 + 1];
+                    corners.push([x, y]);
+                }
+
+                // Calculate bounding rect
+                const xs = corners.map(c => c[0]);
+                const ys = corners.map(c => c[1]);
+                const minX = Math.min(...xs);
+                const maxX = Math.max(...xs);
+                const minY = Math.min(...ys);
+                const maxY = Math.max(...ys);
+                const rectW = maxX - minX;
+                const rectH = maxY - minY;
+                const aspectRatio = rectW / rectH;
+
+                // Check if it looks like a credit card (aspect ratio between 1.2 and 2.0)
+                if (aspectRatio >= 1.2 && aspectRatio <= 2.2) {
+                    // Calculate score
+                    const rectCenterX = minX + rectW / 2;
+                    const rectCenterY = minY + rectH / 2;
+
+                    // Size match score
+                    const sizeMatchW = 1 - Math.abs(rectW - expectedWidth) / expectedWidth;
+                    const sizeMatchH = 1 - Math.abs(rectH - expectedHeight) / expectedHeight;
+
+                    // Center score (how close to center of frame)
+                    const maxDist = Math.sqrt(centerX ** 2 + centerY ** 2);
+                    const centerDist = Math.sqrt((rectCenterX - centerX) ** 2 + (rectCenterY - centerY) ** 2);
+                    const centerScore = 1 - centerDist / maxDist;
+
+                    // Aspect ratio match score
+                    const aspectMatch = 1 - Math.abs(aspectRatio - CREDIT_CARD_ASPECT_RATIO) / CREDIT_CARD_ASPECT_RATIO;
+
+                    // Combined score
+                    const score = (sizeMatchW * 0.25 + sizeMatchH * 0.25 + centerScore * 0.25 + aspectMatch * 0.25);
+
+                    result.candidates.push({
+                        x: minX,
+                        y: minY,
+                        w: rectW,
+                        h: rectH,
+                        corners,
+                        area,
+                        aspectRatio,
+                        score: Math.max(0, score),
+                    });
+
+                    console.log(`[CardDetection] ✅ Quad: ${rectW.toFixed(0)}x${rectH.toFixed(0)} AR=${aspectRatio.toFixed(2)} score=${score.toFixed(2)}`);
+                }
+            }
+
+            approx.delete();
+            contour.delete();
         }
 
-        // Approximate to polygon
-        const epsilon = perimeter * 0.02;
-        const approx = approxPolyDP(contour.points, epsilon);
+        // Sort by score and get best candidate
+        if (result.candidates.length > 0) {
+            result.candidates.sort((a, b) => b.score - a.score);
+            result.bestCandidate = result.candidates[0];
 
-        // We want quadrilaterals (4 points)
-        if (approx.length !== 4 && approx.length !== 5) continue;
+            const best = result.bestCandidate;
+            console.log(`[CardDetection] 🎯 Best: ${best.w.toFixed(0)}x${best.h.toFixed(0)} AR=${best.aspectRatio.toFixed(2)} score=${best.score.toFixed(2)}`);
 
-        // Use first 4 points if we got 5 (closed polygon)
-        const pts = approx.slice(0, 4) as [number, number][];
+            // Check alignment
+            const rectCenterX = best.x + best.w / 2;
+            const rectCenterY = best.y + best.h / 2;
+            const posToleranceCrop = Math.min(imageData.width, imageData.height) * 0.25;
+            const offsetX = Math.abs(rectCenterX - centerX);
+            const offsetY = Math.abs(rectCenterY - centerY);
 
-        // Get bounding rect
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const p of pts) {
-            minX = Math.min(minX, p[0]);
-            minY = Math.min(minY, p[1]);
-            maxX = Math.max(maxX, p[0]);
-            maxY = Math.max(maxY, p[1]);
+            const sizeRatioW = best.w / expectedWidth;
+            const sizeRatioH = best.h / expectedHeight;
+            const sizeTolerance = 0.35;
+
+            const isSizeMatch = sizeRatioW >= (1 - sizeTolerance) && sizeRatioW <= (1 + sizeTolerance) &&
+                                sizeRatioH >= (1 - sizeTolerance) && sizeRatioH <= (1 + sizeTolerance);
+            const isPositionMatch = offsetX <= posToleranceCrop && offsetY <= posToleranceCrop;
+            const isAligned = isSizeMatch && isPositionMatch;
+
+            // Convert to container coordinates
+            const cardX = cropOffsetX + best.x * scaleToContainer;
+            const cardY = cropOffsetY + best.y * scaleToContainer;
+            const cardWidth = best.w * scaleToContainer;
+            const cardHeight = best.h * scaleToContainer;
+
+            // Convert corners to container coordinates
+            const containerCorners = best.corners.map(([cx, cy]): [number, number] => [
+                cropOffsetX + cx * scaleToContainer,
+                cropOffsetY + cy * scaleToContainer,
+            ]);
+
+            result.card = {
+                x: cardX,
+                y: cardY,
+                width: cardWidth,
+                height: cardHeight,
+                centerX: cardX + cardWidth / 2,
+                centerY: cardY + cardHeight / 2,
+                aspectRatio: best.aspectRatio,
+                confidence: best.score,
+                isAligned,
+                corners: containerCorners,
+            };
+
+            console.log(`[CardDetection] 📊 Aligned: ${isAligned} (size: ${isSizeMatch}, pos: ${isPositionMatch})`);
+        } else {
+            console.log('[CardDetection] ❌ No valid card-shaped quadrilaterals found');
         }
 
-        const rectW = maxX - minX;
-        const rectH = maxY - minY;
-
-        // Add to allQuads for visualization (before filtering)
-        allQuads.push({ x: minX, y: minY, w: rectW, h: rectH, points: pts, score: 0 });
-
-        // Calculate rejection reasons (with VERY relaxed thresholds for initial detection)
-        const nearBoundary = minX < boundaryMargin || minY < boundaryMargin ||
-            maxX > width - boundaryMargin || maxY > height - boundaryMargin;
-
-        // VERY relaxed size filters - we just want to detect ANY credit-card-shaped rectangle
-        // Minimum: at least 15% of expected size (card held far away)
-        // Maximum: up to 3x expected size (card held very close or zoomed)
-        const minSizeFactor = 0.15;
-        const maxSizeFactor = 3.0;
-        const tooSmallW = rectW < expectedWidth * minSizeFactor;
-        const tooLargeW = rectW > expectedWidth * maxSizeFactor;
-        const tooSmallH = rectH < expectedHeight * minSizeFactor;
-        const tooLargeH = rectH > expectedHeight * maxSizeFactor;
-
-        // Also check minimum absolute size (reject tiny noise)
-        const tooTiny = rectW < 30 || rectH < 20;
-
-        const aspectRatio = rectW / rectH;
-        const ratioMatch = aspectRatio / CREDIT_CARD_ASPECT_RATIO;
-        // Credit card ratio is ~1.586, accept anything from 1.0 to 2.5 aspect ratio
-        const badRatio = aspectRatio < 1.0 || aspectRatio > 2.5;
-
-        // Log ALL quads for debugging (limit to 15 to avoid spam)
-        if (allQuads.length <= 15) {
-            const reasons: string[] = [];
-            if (nearBoundary) reasons.push('boundary');
-            if (tooSmallW) reasons.push('smallW');
-            if (tooLargeW) reasons.push('largeW');
-            if (tooSmallH) reasons.push('smallH');
-            if (tooLargeH) reasons.push('largeH');
-            if (tooTiny) reasons.push('tiny');
-            if (badRatio) reasons.push('ratio');
-
-            console.log(`[CardDetection] Quad ${allQuads.length}: ${rectW.toFixed(0)}x${rectH.toFixed(0)} @ (${minX.toFixed(0)},${minY.toFixed(0)}) AR=${aspectRatio.toFixed(2)} ${reasons.length ? '❌ ' + reasons.join(',') : '✅ OK'}`);
-        }
-
-        // IMPORTANT: Skip rectangles too close to the crop boundary (likely the boundary itself!)
-        if (nearBoundary) continue;
-
-        // Skip tiny noise
-        if (tooTiny) continue;
-
-        // Skip if too small or too large
-        if (tooSmallW || tooLargeW || tooSmallH || tooLargeH) continue;
-
-        // Check aspect ratio
-        if (badRatio) continue;
-
-        // Calculate scores
-        const rectCenterX = minX + rectW / 2;
-        const rectCenterY = minY + rectH / 2;
-
-        const sizeMatchW = 1 - Math.abs(rectW - expectedWidth) / expectedWidth;
-        const sizeMatchH = 1 - Math.abs(rectH - expectedHeight) / expectedHeight;
-        const centerDist = Math.sqrt((rectCenterX - centerX) ** 2 + (rectCenterY - centerY) ** 2);
-        const maxDist = Math.sqrt(width ** 2 + height ** 2) / 2;
-        const centerScore = 1 - centerDist / maxDist;
-        const aspectScore = 1 - Math.abs(ratioMatch - 1);
-
-        const score = sizeMatchW * 0.25 + sizeMatchH * 0.25 + centerScore * 0.25 + aspectScore * 0.25;
-
-        candidates.push({
-            x: minX,
-            y: minY,
-            w: rectW,
-            h: rectH,
-            points: pts,
-            score
-        });
+    } finally {
+        // Clean up OpenCV Mats
+        src.delete();
+        gray.delete();
+        blurred.delete();
+        edges.delete();
+        dilated.delete();
+        hierarchy.delete();
+        contours.delete();
     }
 
-    console.log('[CardDetection] 🔍 Quads found:', allQuads.length, 'Valid candidates:', candidates.length);
-
-    if (candidates.length === 0) return { best: null, allQuads };
-
-    candidates.sort((a, b) => b.score - a.score);
-    const best = candidates[0];
-
-    console.log('[CardDetection] 🎯 Best rectangle:', {
-        pos: `${best.x.toFixed(0)},${best.y.toFixed(0)}`,
-        size: `${best.w.toFixed(0)}x${best.h.toFixed(0)}`,
-        aspect: (best.w / best.h).toFixed(2),
-        score: best.score.toFixed(2),
-    });
-
-    return { best, allQuads };
+    return result;
 }
 
 // =============================================================================
@@ -681,13 +339,12 @@ function findRectanglesFromContours(
 
 function drawDebugVisualization(
     debugCanvas: HTMLCanvasElement,
-    edges: Uint8Array,
+    candidates: RectangleCandidate[],
+    bestCandidate: RectangleCandidate | null,
     cropWidth: number,
     cropHeight: number,
-    rect: RectangleCandidate | null,
     canvasDisplayWidth: number,
-    canvasDisplayHeight: number,
-    allQuads: RectangleCandidate[] = []  // All quadrilaterals found (for debug)
+    canvasDisplayHeight: number
 ): void {
     const ctx = debugCanvas.getContext('2d');
     if (!ctx) return;
@@ -699,75 +356,53 @@ function drawDebugVisualization(
     const scaleX = canvasDisplayWidth / cropWidth;
     const scaleY = canvasDisplayHeight / cropHeight;
 
-    // Draw edges in green (dimmer)
-    const edgeImageData = ctx.createImageData(canvasDisplayWidth, canvasDisplayHeight);
-    for (let y = 0; y < cropHeight; y++) {
-        for (let x = 0; x < cropWidth; x++) {
-            if (edges[y * cropWidth + x] === 255) {
-                const cx = Math.floor(x * scaleX);
-                const cy = Math.floor(y * scaleY);
-                if (cx >= 0 && cx < canvasDisplayWidth && cy >= 0 && cy < canvasDisplayHeight) {
-                    const idx = (cy * canvasDisplayWidth + cx) * 4;
-                    edgeImageData.data[idx] = 0;
-                    edgeImageData.data[idx + 1] = 200;
-                    edgeImageData.data[idx + 2] = 0;
-                    edgeImageData.data[idx + 3] = 150;
-                }
-            }
-        }
-    }
-    ctx.putImageData(edgeImageData, 0, 0);
+    // Draw all candidates in orange
+    for (const candidate of candidates) {
+        if (candidate === bestCandidate) continue; // Draw best one separately
 
-    // Draw ALL quadrilaterals found (in orange, thin)
-    for (const quad of allQuads) {
-        if (quad.points && quad.points.length >= 4) {
-            ctx.strokeStyle = 'orange';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(quad.points[0][0] * scaleX, quad.points[0][1] * scaleY);
-            for (let i = 1; i < quad.points.length; i++) {
-                ctx.lineTo(quad.points[i][0] * scaleX, quad.points[i][1] * scaleY);
-            }
-            ctx.closePath();
-            ctx.stroke();
+        ctx.strokeStyle = 'orange';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const corners = candidate.corners;
+        ctx.moveTo(corners[0][0] * scaleX, corners[0][1] * scaleY);
+        for (let i = 1; i < corners.length; i++) {
+            ctx.lineTo(corners[i][0] * scaleX, corners[i][1] * scaleY);
         }
+        ctx.closePath();
+        ctx.stroke();
     }
 
-    // Draw BEST detected rectangle in RED (thick)
-    if (rect) {
+    // Draw best candidate in red (thick)
+    if (bestCandidate) {
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 3;
         ctx.beginPath();
-        if (rect.points && rect.points.length >= 4) {
-            ctx.moveTo(rect.points[0][0] * scaleX, rect.points[0][1] * scaleY);
-            for (let i = 1; i < rect.points.length; i++) {
-                ctx.lineTo(rect.points[i][0] * scaleX, rect.points[i][1] * scaleY);
-            }
-            ctx.closePath();
-        } else {
-            ctx.rect(rect.x * scaleX, rect.y * scaleY, rect.w * scaleX, rect.h * scaleY);
+        const corners = bestCandidate.corners;
+        ctx.moveTo(corners[0][0] * scaleX, corners[0][1] * scaleY);
+        for (let i = 1; i < corners.length; i++) {
+            ctx.lineTo(corners[i][0] * scaleX, corners[i][1] * scaleY);
         }
+        ctx.closePath();
         ctx.stroke();
 
         // Draw corner points in yellow
         ctx.fillStyle = 'yellow';
-        if (rect.points) {
-            for (const p of rect.points) {
-                ctx.beginPath();
-                ctx.arc(p[0] * scaleX, p[1] * scaleY, 5, 0, Math.PI * 2);
-                ctx.fill();
-            }
+        for (const corner of corners) {
+            ctx.beginPath();
+            ctx.arc(corner[0] * scaleX, corner[1] * scaleY, 6, 0, Math.PI * 2);
+            ctx.fill();
         }
 
         // Draw center cross
-        const cx = (rect.x + rect.w / 2) * scaleX;
-        const cy = (rect.y + rect.h / 2) * scaleY;
+        const cx = (bestCandidate.x + bestCandidate.w / 2) * scaleX;
+        const cy = (bestCandidate.y + bestCandidate.h / 2) * scaleY;
         ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(cx - 10, cy);
-        ctx.lineTo(cx + 10, cy);
-        ctx.moveTo(cx, cy - 10);
-        ctx.lineTo(cx, cy + 10);
+        ctx.moveTo(cx - 15, cy);
+        ctx.lineTo(cx + 15, cy);
+        ctx.moveTo(cx, cy - 15);
+        ctx.lineTo(cx, cy + 15);
         ctx.stroke();
     }
 
@@ -775,113 +410,6 @@ function drawDebugVisualization(
     ctx.strokeStyle = 'cyan';
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, canvasDisplayWidth - 2, canvasDisplayHeight - 2);
-}
-
-// =============================================================================
-// MAIN DETECTION FUNCTION
-// =============================================================================
-
-interface DetectionResult {
-    card: DetectedCard | null;
-    edges: Uint8Array;
-    rect: RectangleCandidate | null;
-    allQuads: RectangleCandidate[];
-    cropWidth: number;
-    cropHeight: number;
-}
-
-function detectCardInCropRegion(
-    imageData: ImageData,
-    frameX: number,
-    frameY: number,
-    frameWidth: number,
-    frameHeight: number,
-    containerWidth: number,
-    containerHeight: number,
-    sizeTolerance: number,
-    positionTolerance: number,
-    drawX: number,
-    drawY: number,
-    drawWidth: number,
-    drawHeight: number
-): DetectionResult {
-    const { width, height } = imageData;
-
-    // Step 1: Canny edge detection
-    const { edges } = cannyEdgeDetection(imageData);
-
-    const baseResult = {
-        edges,
-        cropWidth: width,
-        cropHeight: height,
-    };
-
-    // Expected card size in crop region (~70% because of 20% margin on each side)
-    const expectedWidthInCrop = width * (1 / 1.4);
-    const expectedHeightInCrop = height * (1 / 1.4);
-
-    // Step 2: Find contours from edges
-    const contours = findContoursFromBinary(edges, width, height);
-
-    console.log('[CardDetection] 🔍 Contours found:', contours.length,
-        'Expected size:', `${expectedWidthInCrop.toFixed(0)}x${expectedHeightInCrop.toFixed(0)}`);
-
-    // Step 3: Find rectangles from contours
-    const { best: rect, allQuads } = findRectanglesFromContours(contours, width, height, expectedWidthInCrop, expectedHeightInCrop);
-
-    if (!rect) {
-        return { ...baseResult, card: null, rect: null, allQuads };
-    }
-
-    // Check alignment
-    const rectCenterX = rect.x + rect.w / 2;
-    const rectCenterY = rect.y + rect.h / 2;
-    const cropCenterX = width / 2;
-    const cropCenterY = height / 2;
-
-    const posToleranceCrop = Math.min(width, height) * 0.25;
-    const offsetX = Math.abs(rectCenterX - cropCenterX);
-    const offsetY = Math.abs(rectCenterY - cropCenterY);
-
-    const sizeRatioW = rect.w / expectedWidthInCrop;
-    const sizeRatioH = rect.h / expectedHeightInCrop;
-
-    const isSizeMatch = sizeRatioW >= (1 - sizeTolerance) && sizeRatioW <= (1 + sizeTolerance) &&
-                        sizeRatioH >= (1 - sizeTolerance) && sizeRatioH <= (1 + sizeTolerance);
-    const isPositionMatch = offsetX <= posToleranceCrop && offsetY <= posToleranceCrop;
-    const isAligned = isSizeMatch && isPositionMatch;
-
-    const aspectRatio = rect.w / rect.h;
-    const confidence = rect.score;
-
-    // Convert to container coordinates
-    const scaleToContainer = drawWidth / width;
-    const cardX = drawX + rect.x * scaleToContainer;
-    const cardY = drawY + rect.y * scaleToContainer;
-    const cardWidth = rect.w * scaleToContainer;
-    const cardHeight = rect.h * scaleToContainer;
-
-    console.log('[CardDetection] 📊 Result:', {
-        sizeRatio: `W:${sizeRatioW.toFixed(2)} H:${sizeRatioH.toFixed(2)}`,
-        posOffset: `X:${offsetX.toFixed(0)} Y:${offsetY.toFixed(0)}`,
-        isSizeMatch,
-        isPositionMatch,
-        isAligned,
-    });
-
-    const card: DetectedCard = {
-        x: cardX,
-        y: cardY,
-        width: cardWidth,
-        height: cardHeight,
-        centerX: cardX + cardWidth / 2,
-        centerY: cardY + cardHeight / 2,
-        aspectRatio,
-        confidence,
-        isAligned,
-    };
-
-    return { ...baseResult, card, rect, allQuads };
 }
 
 // =============================================================================
@@ -902,12 +430,15 @@ export function useCardDetection({
     const [isDetecting, setIsDetecting] = useState(false);
     const [isCardAligned, setIsCardAligned] = useState(false);
     const [stabilityCounter, setStabilityCounter] = useState(0);
+    const [isLoading, setIsLoading] = useState(false);
 
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const stableCountRef = useRef(0);
+    const cvRef = useRef<OpenCVModule | null>(null);
 
+    // Initialize canvas
     useEffect(() => {
         if (!canvasRef.current) {
             canvasRef.current = document.createElement('canvas');
@@ -915,13 +446,31 @@ export function useCardDetection({
         }
     }, []);
 
-    const detectCard = useCallback(() => {
-        if (!videoElement || !canvasRef.current || !ctxRef.current) return;
+    // Load OpenCV when detection starts
+    const ensureOpenCVLoaded = useCallback(async () => {
+        if (cvRef.current) return true;
 
+        setIsLoading(true);
+        try {
+            cvRef.current = await loadOpenCV();
+            setIsLoading(false);
+            return true;
+        } catch (error) {
+            console.error('[CardDetection] Failed to load OpenCV:', error);
+            setIsLoading(false);
+            return false;
+        }
+    }, []);
+
+    const detectCard = useCallback(() => {
+        if (!videoElement || !canvasRef.current || !ctxRef.current || !cvRef.current) return;
+
+        const cv = cvRef.current;
         const videoBounds = getVideoBounds(videoElement, containerWidth, containerHeight);
         const frameX = (containerWidth - expectedFrameWidth) / 2;
         const frameY = (containerHeight - expectedFrameHeight) / 2;
 
+        // Crop region with margin
         const margin = 0.2;
         const marginX = expectedFrameWidth * margin;
         const marginY = expectedFrameHeight * margin;
@@ -930,30 +479,61 @@ export function useCardDetection({
         const drawWidth = Math.min(expectedFrameWidth + marginX * 2, videoBounds.width);
         const drawHeight = Math.min(expectedFrameHeight + marginY * 2, videoBounds.height);
 
-        const imageData = getFrameRegionImageData(
-            videoElement, canvasRef.current, ctxRef.current,
-            frameX, frameY, expectedFrameWidth, expectedFrameHeight, videoBounds
-        );
-        if (!imageData) return;
+        // Calculate video source coordinates
+        const videoX = Math.floor((drawX - videoBounds.x) / videoBounds.scaleX);
+        const videoY = Math.floor((drawY - videoBounds.y) / videoBounds.scaleY);
+        const videoW = Math.floor(drawWidth / videoBounds.scaleX);
+        const videoH = Math.floor(drawHeight / videoBounds.scaleY);
 
-        const result = detectCardInCropRegion(
-            imageData, frameX, frameY, expectedFrameWidth, expectedFrameHeight,
-            containerWidth, containerHeight, sizeTolerance, positionTolerance,
-            drawX, drawY, drawWidth, drawHeight
+        const srcX = Math.max(0, Math.min(videoX, videoElement.videoWidth - 1));
+        const srcY = Math.max(0, Math.min(videoY, videoElement.videoHeight - 1));
+        const srcW = Math.min(videoW, videoElement.videoWidth - srcX);
+        const srcH = Math.min(videoH, videoElement.videoHeight - srcY);
+
+        if (srcW <= 0 || srcH <= 0) return;
+
+        // Draw video frame to canvas
+        canvasRef.current.width = srcW;
+        canvasRef.current.height = srcH;
+        ctxRef.current.drawImage(videoElement, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
+
+        const imageData = ctxRef.current.getImageData(0, 0, srcW, srcH);
+
+        // Expected card size in crop region
+        const expectedWidthInCrop = srcW * (1 / 1.4);
+        const expectedHeightInCrop = srcH * (1 / 1.4);
+        const scaleToContainer = drawWidth / srcW;
+
+        // Detect card with OpenCV
+        const result = detectCardWithOpenCV(
+            cv,
+            imageData,
+            expectedWidthInCrop,
+            expectedHeightInCrop,
+            drawX,
+            drawY,
+            scaleToContainer
         );
 
+        // Draw debug visualization
         if (debugCanvasRef?.current) {
             const canvasDisplayWidth = expectedFrameWidth * 1.4;
             const canvasDisplayHeight = expectedFrameHeight * 1.4;
             drawDebugVisualization(
-                debugCanvasRef.current, result.edges, result.cropWidth, result.cropHeight,
-                result.rect, canvasDisplayWidth, canvasDisplayHeight, result.allQuads
+                debugCanvasRef.current,
+                result.candidates,
+                result.bestCandidate,
+                srcW,
+                srcH,
+                canvasDisplayWidth,
+                canvasDisplayHeight
             );
         }
 
         const card = result.card;
         setDetectedCard(card);
 
+        // Update stability counter
         if (card && card.isAligned) {
             stableCountRef.current = Math.min(stableCountRef.current + 1, STABILITY_THRESHOLD * 2);
             setStabilityCounter(stableCountRef.current);
@@ -969,17 +549,22 @@ export function useCardDetection({
             setStabilityCounter(stableCountRef.current);
             setIsCardAligned(false);
         }
-    }, [videoElement, containerWidth, containerHeight, expectedFrameWidth, expectedFrameHeight, sizeTolerance, positionTolerance, debugCanvasRef]);
+    }, [videoElement, containerWidth, containerHeight, expectedFrameWidth, expectedFrameHeight, debugCanvasRef]);
 
-    const startDetection = useCallback(() => {
+    const startDetection = useCallback(async () => {
         if (intervalRef.current) return;
+
+        // Ensure OpenCV is loaded
+        const loaded = await ensureOpenCVLoaded();
+        if (!loaded) return;
+
         setIsDetecting(true);
         setDetectedCard(null);
         setIsCardAligned(false);
         setStabilityCounter(0);
         stableCountRef.current = 0;
         intervalRef.current = setInterval(detectCard, DETECTION_INTERVAL);
-    }, [detectCard]);
+    }, [detectCard, ensureOpenCVLoaded]);
 
     const stopDetection = useCallback(() => {
         if (intervalRef.current) {
@@ -989,12 +574,14 @@ export function useCardDetection({
         setIsDetecting(false);
     }, []);
 
+    // Cleanup on unmount
     useEffect(() => {
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current);
         };
     }, []);
 
+    // Auto-start detection when video is ready
     useEffect(() => {
         if (videoElement && videoElement.videoWidth > 0) {
             startDetection();
@@ -1002,5 +589,13 @@ export function useCardDetection({
         return stopDetection;
     }, [videoElement, startDetection, stopDetection]);
 
-    return { detectedCard, isDetecting, isCardAligned, stabilityCounter, startDetection, stopDetection };
+    return {
+        detectedCard,
+        isDetecting,
+        isCardAligned,
+        stabilityCounter,
+        isLoading,
+        startDetection,
+        stopDetection,
+    };
 }
