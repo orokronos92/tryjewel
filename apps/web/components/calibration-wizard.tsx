@@ -57,13 +57,19 @@ interface StepConfig {
 // FOV standard assumé pour les webcams (65° est une bonne moyenne)
 const ASSUMED_FOV_DEG = 65;
 
+// Réduction du cadre de 30% pour mieux correspondre à la réalité
+const FRAME_SIZE_FACTOR = 0.7;
+
+// Tolérance de distance: ±5%
+const DISTANCE_TOLERANCE = 0.05;
+
 // Calcul de la taille du cadre carte à une distance donnée
 // visibleWidth = 2 × distance × tan(FOV/2)
 // cardPixels = (cardWidthMM / visibleWidth) × videoWidth
 function calculateCardFrameSize(distanceMm: number, videoWidth: number, fovDeg: number = ASSUMED_FOV_DEG): number {
     const fovRad = (fovDeg * Math.PI) / 180;
     const visibleWidthMm = 2 * distanceMm * Math.tan(fovRad / 2);
-    return (CREDIT_CARD_WIDTH_MM / visibleWidthMm) * videoWidth;
+    return (CREDIT_CARD_WIDTH_MM / visibleWidthMm) * videoWidth * FRAME_SIZE_FACTOR;
 }
 
 const STEPS: StepConfig[] = [
@@ -259,15 +265,15 @@ export function CalibrationWizard({
 
         setDetectedPalmWidthPx(palmWidth);
 
-        // Vérifier si la main est à peu près à la bonne distance
-        // Tolérance large (±20%) car l'utilisateur ajuste visuellement
+        // Vérifier si la main est à la bonne distance (±5%)
         const ratio = palmWidth / expectedPalmWidthPx;
-        const isInFrame = ratio >= 0.6 && ratio <= 1.5; // Large tolérance
+        const isInFrame = ratio >= (1 - DISTANCE_TOLERANCE) && ratio <= (1 + DISTANCE_TOLERANCE);
 
         console.log('[Calibration] 📏 Main détectée:', {
             palmWidthPx: palmWidth.toFixed(1),
             expectedPx: expectedPalmWidthPx.toFixed(1),
             ratio: ratio.toFixed(3),
+            tolerance: `±${DISTANCE_TOLERANCE * 100}%`,
             isInFrame,
         });
 
@@ -431,7 +437,7 @@ export function CalibrationWizard({
         // Couleur selon l'état
         const getCircleColor = () => {
             if (isHandInFrame) return 'rgb(34, 197, 94)'; // green-500
-            if (distanceRatio && distanceRatio >= 0.6 && distanceRatio <= 1.5) {
+            if (distanceRatio && distanceRatio >= (1 - DISTANCE_TOLERANCE) && distanceRatio <= (1 + DISTANCE_TOLERANCE)) {
                 return 'rgb(234, 179, 8)'; // yellow-500 (dans la zone, stabilisation)
             }
             if (isDetecting) return 'rgb(239, 68, 68)'; // red-500 (hors zone)
@@ -444,9 +450,9 @@ export function CalibrationWizard({
             if (isHandInFrame) return null;
             if (!distanceRatio) return null;
 
-            if (distanceRatio < 0.6) {
+            if (distanceRatio < (1 - DISTANCE_TOLERANCE)) {
                 return { text: 'Rapprochez-vous', color: 'text-red-400' };
-            } else if (distanceRatio > 1.5) {
+            } else if (distanceRatio > (1 + DISTANCE_TOLERANCE)) {
                 return { text: 'Éloignez-vous', color: 'text-red-400' };
             } else {
                 return { text: 'Maintenez...', color: 'text-yellow-400' };
@@ -510,7 +516,7 @@ export function CalibrationWizard({
                                 </div>
                                 {distanceRatio && (
                                     <span className="text-xs text-gray-500">
-                                        {(distanceRatio * 100).toFixed(0)}% (cible: 60-150%)
+                                        {(distanceRatio * 100).toFixed(0)}% (cible: {((1 - DISTANCE_TOLERANCE) * 100).toFixed(0)}-{((1 + DISTANCE_TOLERANCE) * 100).toFixed(0)}%)
                                     </span>
                                 )}
                             </div>
