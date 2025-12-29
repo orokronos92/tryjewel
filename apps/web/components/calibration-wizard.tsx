@@ -11,9 +11,8 @@ import {
     circumferenceToRingSizes,
 } from "@/stores/calibration-store";
 import { useEdgeTrackingStore } from "@/stores/edge-tracking-store";
-import { useCardDetection } from "@/hooks/use-card-detection";
 import { Button } from "@/components/ui/button";
-import { CreditCard, Hand, Check, X, ChevronRight, Loader2, MoveHorizontal, MoveVertical, ZoomIn, ZoomOut } from "lucide-react";
+import { Hand, Check, X, ChevronRight, Loader2 } from "lucide-react";
 
 // Ratio profondeur/largeur pour les doigts (ellipse, doigt vu de face vs profil)
 const FINGER_DEPTH_RATIO = 0.85;
@@ -48,7 +47,6 @@ interface StepConfig {
     icon: React.ReactNode;
     title: string;
     instruction: string;
-    type: 'card' | 'hand';
     distance: 'close' | 'far';
 }
 
@@ -56,33 +54,29 @@ interface StepConfig {
 // CONSTANTES
 // =============================================================================
 
+// FOV standard assumé pour les webcams (65° est une bonne moyenne)
+const ASSUMED_FOV_DEG = 65;
+
+// Calcul de la taille du cadre carte à une distance donnée
+// visibleWidth = 2 × distance × tan(FOV/2)
+// cardPixels = (cardWidthMM / visibleWidth) × videoWidth
+function calculateCardFrameSize(distanceMm: number, videoWidth: number, fovDeg: number = ASSUMED_FOV_DEG): number {
+    const fovRad = (fovDeg * Math.PI) / 180;
+    const visibleWidthMm = 2 * distanceMm * Math.tan(fovRad / 2);
+    return (CREDIT_CARD_WIDTH_MM / visibleWidthMm) * videoWidth;
+}
+
 const STEPS: StepConfig[] = [
-    {
-        icon: <CreditCard className="h-5 w-5" />,
-        title: "Carte (20cm)",
-        instruction: "Placez une carte bancaire à 20cm de la caméra et ajustez le cadre",
-        type: 'card',
-        distance: 'close',
-    },
     {
         icon: <Hand className="h-5 w-5" />,
         title: "Main (20cm)",
-        instruction: "Gardez la même distance (20cm) et ajustez le contour à votre main",
-        type: 'hand',
+        instruction: "Placez votre main ouverte à ~20cm de la caméra dans le cadre",
         distance: 'close',
-    },
-    {
-        icon: <CreditCard className="h-5 w-5" />,
-        title: "Carte (40cm)",
-        instruction: "Reculez à 40cm et ajustez le cadre à la carte",
-        type: 'card',
-        distance: 'far',
     },
     {
         icon: <Hand className="h-5 w-5" />,
         title: "Main (40cm)",
-        instruction: "Gardez la distance (40cm) et ajustez le contour à votre main",
-        type: 'hand',
+        instruction: "Reculez à ~40cm et placez votre main dans le cadre",
         distance: 'far',
     },
 ];
@@ -101,8 +95,6 @@ export function CalibrationWizard({
     const {
         currentStep,
         setCurrentStep,
-        closeDistance,
-        farDistance,
         setCloseCardCalibration,
         setCloseHandMeasurements,
         setFarCardCalibration,
@@ -117,12 +109,9 @@ export function CalibrationWizard({
 
     // État pour la détection de main
     const [detectedPalmWidthPx, setDetectedPalmWidthPx] = useState<number | null>(null);
-    const [isHandAtCorrectDistance, setIsHandAtCorrectDistance] = useState(false);
+    const [isHandInFrame, setIsHandInFrame] = useState(false);
     const [capturedLandmarks, setCapturedLandmarks] = useState<typeof landmarks | null>(null);
     const [stabilityCounter, setStabilityCounter] = useState(0);
-
-    // Ref pour le canvas de debug Canny
-    const debugCanvasRef = useRef<HTMLCanvasElement>(null);
 
     // Fonction pour calculer la distance entre deux landmarks en pixels
     const getLandmarkDistancePx = (
@@ -204,42 +193,31 @@ export function CalibrationWizard({
         };
     };
 
-    // ⚡ FIX: Toujours utiliser un index valide (0-3)
-    // Si currentStep est 0 ou invalide, on force l'affichage de l'étape 1
-    const stepIndex = Math.max(0, Math.min(3, currentStep - 1));
+    // Index de l'étape (0 ou 1 pour les 2 étapes)
+    const stepIndex = Math.max(0, Math.min(1, currentStep - 1));
     const step = STEPS[stepIndex];
 
     // Debug log
     console.log('[CalibrationWizard] 🎯 Render:', { currentStep, stepIndex, stepTitle: step.title });
 
     // ==========================================================================
-    // CARD DETECTION - Calcul des dimensions attendues pour le cadre carte
+    // CALCUL DU CADRE DE RÉFÉRENCE (basé sur FOV assumé)
+    // Le cadre représente la taille d'une carte bancaire à la distance donnée
     // ==========================================================================
-    const expectedCardWidth = useMemo(() => {
-        if (step.type !== 'card') return 0;
-        return step.distance === 'close' ? containerWidth * 0.30 : containerWidth * 0.15;
-    }, [step.type, step.distance, containerWidth]);
+    const distanceMm = step.distance === 'close' ? 200 : 400; // 20cm ou 40cm
 
-    const expectedCardHeight = useMemo(() => {
-        return expectedCardWidth / (CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM);
-    }, [expectedCardWidth]);
+    const referenceFrameWidth = useMemo(() => {
+        const videoWidth = videoElement?.videoWidth || containerWidth;
+        return calculateCardFrameSize(distanceMm, videoWidth, ASSUMED_FOV_DEG);
+    }, [distanceMm, videoElement?.videoWidth, containerWidth]);
 
-    // Hook de détection automatique de la carte (avec OpenCV)
-    const {
-        detectedCard,
-        isCardAligned,
-        stabilityCounter: cardStabilityCounter,
-        isLoading: isOpenCVLoading,
-    } = useCardDetection({
-        videoElement: step.type === 'card' ? videoElement : null,
-        containerWidth,
-        containerHeight,
-        expectedFrameWidth: expectedCardWidth,
-        expectedFrameHeight: expectedCardHeight,
-        sizeTolerance: 0.25, // ±25% de tolérance sur la taille
-        positionTolerance: 50, // ±50px de tolérance sur la position
-        debugCanvasRef, // Canvas pour visualiser les edges Canny
-    });
+    const referenceFrameHeight = useMemo(() => {
+        return referenceFrameWidth / (CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM);
+    }, [referenceFrameWidth]);
+
+    // pixelsPerMm calculé depuis le cadre de référence
+    // Le cadre représente CREDIT_CARD_WIDTH_MM (85.6mm)
+    const currentPixelsPerMm = referenceFrameWidth / CREDIT_CARD_WIDTH_MM;
 
     // ⚡ FIX: Synchroniser le store si currentStep est invalide
     useEffect(() => {
@@ -257,22 +235,17 @@ export function CalibrationWizard({
         }
     }, [videoElement, setVideoDimensions]);
 
-    // Récupérer le pixelsPerMm de la carte pour cette distance
-    const currentPixelsPerMm = step.distance === 'close'
-        ? closeDistance?.pixelsPerMm
-        : farDistance?.pixelsPerMm;
-
-    // Taille attendue du cercle cible (paume à la bonne distance)
-    // Paume ≈ 85mm, donc cercle = 85mm × pixelsPerMm
-    const expectedPalmWidthPx = currentPixelsPerMm ? PALM_WIDTH_MM * currentPixelsPerMm : null;
+    // Taille attendue de la paume à cette distance
+    // Paume ≈ 70mm, cadre représente 85.6mm de carte
+    const expectedPalmWidthPx = PALM_WIDTH_MM * currentPixelsPerMm;
 
     // ==========================================================================
-    // DÉTECTION MEDIAPIPE - Vérification distance main = distance carte (±5%)
+    // DÉTECTION MEDIAPIPE - Vérification que la main est dans le cadre (±20%)
     // ==========================================================================
     useEffect(() => {
-        if (step.type !== 'hand' || !landmarks || landmarks.length < 21) {
+        if (!landmarks || landmarks.length < 21) {
             setDetectedPalmWidthPx(null);
-            setIsHandAtCorrectDistance(false);
+            setIsHandInFrame(false);
             return;
         }
 
@@ -286,126 +259,127 @@ export function CalibrationWizard({
 
         setDetectedPalmWidthPx(palmWidth);
 
-        // Vérifier si la main est à la bonne distance (même distance que la carte)
-        // expectedPalmWidthPx = PALM_WIDTH_MM × pixelsPerMm (de la carte)
-        if (expectedPalmWidthPx) {
-            const ratio = palmWidth / expectedPalmWidthPx;
-            const isCorrectDistance = ratio >= (1 - DISTANCE_TOLERANCE) && ratio <= (1 + DISTANCE_TOLERANCE);
+        // Vérifier si la main est à peu près à la bonne distance
+        // Tolérance large (±20%) car l'utilisateur ajuste visuellement
+        const ratio = palmWidth / expectedPalmWidthPx;
+        const isInFrame = ratio >= 0.6 && ratio <= 1.5; // Large tolérance
 
-            console.log('[Calibration] 📏 Vérification distance:', {
-                palmWidthPx: palmWidth.toFixed(1),
-                expectedPx: expectedPalmWidthPx.toFixed(1),
-                ratio: ratio.toFixed(3),
-                tolerance: `±${DISTANCE_TOLERANCE * 100}%`,
-                isCorrect: isCorrectDistance,
-            });
+        console.log('[Calibration] 📏 Main détectée:', {
+            palmWidthPx: palmWidth.toFixed(1),
+            expectedPx: expectedPalmWidthPx.toFixed(1),
+            ratio: ratio.toFixed(3),
+            isInFrame,
+        });
 
-            if (isCorrectDistance) {
-                // Incrémenter le compteur de stabilité
-                setStabilityCounter(prev => Math.min(prev + 1, 30));
-            } else {
-                // Reset si hors tolérance
-                setStabilityCounter(0);
-            }
-
-            // Valider après 15 frames stables (~0.5 sec)
-            if (stabilityCounter >= 15) {
-                setIsHandAtCorrectDistance(true);
-
-                // Capturer les landmarks quand stable
-                if (!capturedLandmarks) {
-                    setCapturedLandmarks([...landmarks]);
-                    console.log('[Calibration] ✅ Main capturée à bonne distance!', {
-                        palmWidthPx: palmWidth.toFixed(1),
-                        expectedPx: expectedPalmWidthPx.toFixed(1),
-                        ratio: ratio.toFixed(3),
-                    });
-                }
-            } else {
-                setIsHandAtCorrectDistance(false);
-            }
+        if (isInFrame) {
+            // Incrémenter le compteur de stabilité
+            setStabilityCounter(prev => Math.min(prev + 1, 20));
+        } else {
+            // Réduire si hors zone
+            setStabilityCounter(prev => Math.max(prev - 2, 0));
         }
-    }, [landmarks, step.type, expectedPalmWidthPx, containerWidth, containerHeight, stabilityCounter, capturedLandmarks]);
+
+        // Valider après 10 frames stables (~0.8 sec)
+        if (stabilityCounter >= 10) {
+            setIsHandInFrame(true);
+
+            // Capturer les landmarks quand stable
+            if (!capturedLandmarks) {
+                setCapturedLandmarks([...landmarks]);
+                console.log('[Calibration] ✅ Main capturée!', {
+                    palmWidthPx: palmWidth.toFixed(1),
+                    pixelsPerMm: currentPixelsPerMm.toFixed(3),
+                    palmWidthMm: (palmWidth / currentPixelsPerMm).toFixed(1),
+                });
+            }
+        } else {
+            setIsHandInFrame(false);
+        }
+    }, [landmarks, expectedPalmWidthPx, containerWidth, containerHeight, stabilityCounter, capturedLandmarks, currentPixelsPerMm]);
 
     // Reset quand on change d'étape
     useEffect(() => {
         setDetectedPalmWidthPx(null);
-        setIsHandAtCorrectDistance(false);
+        setIsHandInFrame(false);
         setCapturedLandmarks(null);
         setStabilityCounter(0);
     }, [currentStep]);
 
     // Confirmer l'étape actuelle
     const handleConfirm = () => {
-        if (step.type === 'card') {
-            // Utiliser la largeur de la carte détectée (plus précise) ou le cadre fixe
-            const cardWidth = detectedCard?.width || expectedCardWidth;
-
-            console.log('[Calibration] 📏 Carte détectée:', {
-                detectedWidth: detectedCard?.width?.toFixed(1),
-                expectedWidth: expectedCardWidth.toFixed(1),
-                usingWidth: cardWidth.toFixed(1),
-                distance: step.distance,
-            });
-
-            if (step.distance === 'close') {
-                setCloseCardCalibration(cardWidth);
-            } else {
-                setFarCardCalibration(cardWidth);
-            }
-        } else {
-            // Utiliser les landmarks capturés par MediaPipe
-            if (!capturedLandmarks || !detectedPalmWidthPx || !currentPixelsPerMm) {
-                console.warn('[Calibration] ⚠️ Pas de landmarks capturés');
-                return;
-            }
-
-            // Calculer la hauteur de main approximative
-            const wrist = capturedLandmarks[0];
-            const middleTip = capturedLandmarks[12];
-            const handHeightPx = Math.sqrt(
-                Math.pow((middleTip.x - wrist.x) * containerWidth, 2) +
-                Math.pow((middleTip.y - wrist.y) * containerHeight, 2)
-            );
-
-            // La largeur de paume détectée par MediaPipe, convertie en mm
-            const palmWidthMm = detectedPalmWidthPx / currentPixelsPerMm;
-
-            console.log('[Calibration] 📏 MediaPipe - Mesures paume:', {
-                palmWidthPx: detectedPalmWidthPx.toFixed(1),
-                palmWidthMm: palmWidthMm.toFixed(1),
-                handHeightPx: handHeightPx.toFixed(1),
-                pixelsPerMm: currentPixelsPerMm.toFixed(3),
-            });
-
-            // Calculer les mesures de chaque doigt à partir des VRAIS landmarks
-            const handMeasurements: HandMeasurements = {
-                handWidthPx: detectedPalmWidthPx,
-                handHeightPx,
-                index: calculateFingerMeasurementFromLandmarks('index', capturedLandmarks, currentPixelsPerMm),
-                middle: calculateFingerMeasurementFromLandmarks('middle', capturedLandmarks, currentPixelsPerMm),
-                ring: calculateFingerMeasurementFromLandmarks('ring', capturedLandmarks, currentPixelsPerMm),
-                pinky: calculateFingerMeasurementFromLandmarks('pinky', capturedLandmarks, currentPixelsPerMm),
-            };
-
-            console.log('[Calibration] 💍 Tailles bagues (depuis landmarks réels):', {
-                index: handMeasurements.index?.ringSizes.eu,
-                middle: handMeasurements.middle?.ringSizes.eu,
-                ring: handMeasurements.ring?.ringSizes.eu,
-                pinky: handMeasurements.pinky?.ringSizes.eu,
-            });
-
-            if (step.distance === 'close') {
-                setCloseHandMeasurements(handMeasurements);
-            } else {
-                setFarHandMeasurements(handMeasurements);
-            }
+        // Utiliser les landmarks capturés par MediaPipe
+        if (!capturedLandmarks || !detectedPalmWidthPx) {
+            console.warn('[Calibration] ⚠️ Pas de landmarks capturés');
+            return;
         }
 
-        // Passer à l'étape suivante ou terminer
-        if (currentStep < 4) {
+        // D'abord, enregistrer la calibration "carte" basée sur le cadre de référence
+        // Cela permet de maintenir la compatibilité avec le store existant
+        if (step.distance === 'close') {
+            setCloseCardCalibration(referenceFrameWidth);
+        } else {
+            setFarCardCalibration(referenceFrameWidth);
+        }
+
+        // Calculer la hauteur de main approximative
+        const wrist = capturedLandmarks[0];
+        const middleTip = capturedLandmarks[12];
+        const handHeightPx = Math.sqrt(
+            Math.pow((middleTip.x - wrist.x) * containerWidth, 2) +
+            Math.pow((middleTip.y - wrist.y) * containerHeight, 2)
+        );
+
+        // La largeur de paume détectée par MediaPipe, convertie en mm
+        // pixelsPerMm est calculé depuis le cadre de référence
+        const palmWidthMm = detectedPalmWidthPx / currentPixelsPerMm;
+
+        console.log('[Calibration] 📏 Mesures main:', {
+            distance: step.distance,
+            referenceFrameWidthPx: referenceFrameWidth.toFixed(1),
+            pixelsPerMm: currentPixelsPerMm.toFixed(3),
+            palmWidthPx: detectedPalmWidthPx.toFixed(1),
+            palmWidthMm: palmWidthMm.toFixed(1),
+            handHeightPx: handHeightPx.toFixed(1),
+        });
+
+        // Calculer les mesures de chaque doigt à partir des VRAIS landmarks
+        const handMeasurements: HandMeasurements = {
+            handWidthPx: detectedPalmWidthPx,
+            handHeightPx,
+            index: calculateFingerMeasurementFromLandmarks('index', capturedLandmarks, currentPixelsPerMm),
+            middle: calculateFingerMeasurementFromLandmarks('middle', capturedLandmarks, currentPixelsPerMm),
+            ring: calculateFingerMeasurementFromLandmarks('ring', capturedLandmarks, currentPixelsPerMm),
+            pinky: calculateFingerMeasurementFromLandmarks('pinky', capturedLandmarks, currentPixelsPerMm),
+        };
+
+        console.log('[Calibration] 💍 Tailles bagues:', {
+            index: handMeasurements.index?.ringSizes.eu,
+            middle: handMeasurements.middle?.ringSizes.eu,
+            ring: handMeasurements.ring?.ringSizes.eu,
+            pinky: handMeasurements.pinky?.ringSizes.eu,
+        });
+
+        if (step.distance === 'close') {
+            setCloseHandMeasurements(handMeasurements);
+        } else {
+            setFarHandMeasurements(handMeasurements);
+        }
+
+        // Passer à l'étape suivante ou terminer (2 étapes maintenant)
+        if (currentStep < 2) {
             setCurrentStep(currentStep + 1);
         } else {
+            // Calculer et logger le FOV réel avant de terminer
+            if (videoElement?.videoWidth) {
+                const visibleWidthMm = (videoElement.videoWidth / referenceFrameWidth) * CREDIT_CARD_WIDTH_MM;
+                const calculatedFov = 2 * Math.atan(visibleWidthMm / (2 * distanceMm)) * (180 / Math.PI);
+                console.log('[Calibration] 📐 FOV calculé:', {
+                    assumedFov: ASSUMED_FOV_DEG,
+                    calculatedFov: calculatedFov.toFixed(1),
+                    visibleWidthMm: visibleWidthMm.toFixed(1),
+                    distanceMm,
+                });
+            }
             completeCalibration();
             onClose();
         }
@@ -440,164 +414,14 @@ export function CalibrationWizard({
         </div>
     );
 
-    // Rendu du contenu selon le type d'étape
+    // Rendu du contenu - Main avec cadre de référence
     const renderStepContent = () => {
         if (!step) return null;
 
-        if (step.type === 'card') {
-            // Taille FIXE du cadre carte pour 20cm et 40cm
-            const fixedCardWidth = expectedCardWidth;
-            const fixedCardHeight = expectedCardHeight;
-
-            // Déterminer la couleur du cadre selon l'état de détection
-            const getFrameColor = () => {
-                if (isCardAligned) return 'rgb(34, 197, 94)'; // green-500
-                if (detectedCard && detectedCard.confidence > 0.5) {
-                    return 'rgb(234, 179, 8)'; // yellow-500 (détecté, pas aligné)
-                }
-                return 'rgb(59, 130, 246)'; // blue-500 (en attente)
-            };
-
-            // Message de guidance
-            const getCardGuidance = () => {
-                if (isCardAligned) return null;
-                if (!detectedCard) return { text: 'Montrez votre carte bancaire', icon: <CreditCard className="w-5 h-5" /> };
-
-                // Vérifier les problèmes de taille
-                const sizeRatioW = detectedCard.width / fixedCardWidth;
-                const sizeRatioH = detectedCard.height / fixedCardHeight;
-
-                if (sizeRatioW < 0.8 || sizeRatioH < 0.8) {
-                    return { text: 'Rapprochez la carte', icon: <ZoomIn className="w-5 h-5" />, color: 'text-yellow-400' };
-                }
-                if (sizeRatioW > 1.2 || sizeRatioH > 1.2) {
-                    return { text: 'Éloignez la carte', icon: <ZoomOut className="w-5 h-5" />, color: 'text-yellow-400' };
-                }
-
-                // Vérifier la position
-                const frameCenterX = containerWidth / 2;
-                const frameCenterY = containerHeight / 2;
-                const offsetX = detectedCard.centerX - frameCenterX;
-                const offsetY = detectedCard.centerY - frameCenterY;
-
-                if (Math.abs(offsetX) > 40 || Math.abs(offsetY) > 40) {
-                    return { text: 'Centrez la carte', icon: <MoveHorizontal className="w-5 h-5" />, color: 'text-yellow-400' };
-                }
-
-                return { text: 'Maintenez la position...', icon: <Loader2 className="w-5 h-5 animate-spin" />, color: 'text-yellow-400' };
-            };
-
-            const guidance = getCardGuidance();
-            const frameColor = getFrameColor();
-
-            return (
-                <div className="relative w-full h-full flex flex-col">
-                    {/* Zone centrale - cadre de la carte avec détection */}
-                    <div className="flex-1 flex items-center justify-center relative">
-                        {/* Canvas debug - couvre exactement la zone du cadre + marge */}
-                        <canvas
-                            ref={debugCanvasRef}
-                            className="absolute pointer-events-none z-20"
-                            style={{
-                                width: fixedCardWidth * 1.4,  // +20% margin each side
-                                height: fixedCardHeight * 1.4,
-                            }}
-                        />
-
-                        {/* Cadre cible */}
-                        <div
-                            className="border-2 relative rounded-lg transition-all duration-300"
-                            style={{
-                                width: fixedCardWidth,
-                                height: fixedCardHeight,
-                                borderColor: frameColor,
-                                backgroundColor: isCardAligned ? 'rgba(34, 197, 94, 0.2)' : 'rgba(59, 130, 246, 0.1)',
-                                boxShadow: `0 0 30px ${frameColor}40`,
-                            }}
-                        >
-                            {/* Coins décoratifs */}
-                            <div className="absolute -top-1 -left-1 w-5 h-5 border-t-2 border-l-2 rounded-tl transition-colors duration-300" style={{ borderColor: frameColor }} />
-                            <div className="absolute -top-1 -right-1 w-5 h-5 border-t-2 border-r-2 rounded-tr transition-colors duration-300" style={{ borderColor: frameColor }} />
-                            <div className="absolute -bottom-1 -left-1 w-5 h-5 border-b-2 border-l-2 rounded-bl transition-colors duration-300" style={{ borderColor: frameColor }} />
-                            <div className="absolute -bottom-1 -right-1 w-5 h-5 border-b-2 border-r-2 rounded-br transition-colors duration-300" style={{ borderColor: frameColor }} />
-
-                            {/* Label dimensions */}
-                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-cyan-400">
-                                {CREDIT_CARD_WIDTH_MM} mm
-                            </div>
-                            <div className="absolute top-1/2 -right-14 -translate-y-1/2 bg-black/70 px-2 py-0.5 rounded text-sm font-mono text-cyan-400">
-                                {CREDIT_CARD_HEIGHT_MM.toFixed(0)} mm
-                            </div>
-
-                            {/* Checkmark quand aligné */}
-                            {isCardAligned && (
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                    <div className="bg-green-500 rounded-full p-3">
-                                        <Check className="w-8 h-8 text-white" />
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-
-                        {/* Indicateur d'état au-dessus */}
-                        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/80 px-4 py-2 rounded-lg">
-                            {isCardAligned ? (
-                                <div className="flex items-center gap-2">
-                                    <Check className="w-5 h-5 text-green-500" />
-                                    <span className="text-green-400 text-sm">Carte détectée!</span>
-                                </div>
-                            ) : guidance ? (
-                                <div className="flex items-center gap-2">
-                                    <span className={guidance.color || 'text-gray-400'}>{guidance.icon}</span>
-                                    <span className={`text-sm ${guidance.color || 'text-gray-400'}`}>{guidance.text}</span>
-                                </div>
-                            ) : null}
-                        </div>
-
-                        {/* Barre de progression de stabilité */}
-                        {detectedCard && !isCardAligned && (
-                            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-48">
-                                <div className="bg-gray-700 rounded-full h-2 overflow-hidden">
-                                    <div
-                                        className="bg-green-500 h-full transition-all duration-100"
-                                        style={{ width: `${(cardStabilityCounter / 15) * 100}%` }}
-                                    />
-                                </div>
-                                <p className="text-xs text-center text-gray-400 mt-1">
-                                    Maintenez la position...
-                                </p>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Instruction en bas */}
-                    <div className="bg-black/70 p-4 rounded-t-lg text-center">
-                        <p className="text-gray-300">
-                            {step.distance === 'close'
-                                ? "Placez votre carte dans le cadre à ~20cm"
-                                : "Reculez à ~40cm et placez la carte dans le cadre"
-                            }
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                            La carte sera détectée automatiquement
-                        </p>
-                    </div>
-                </div>
-            );
-        }
-
-        // Type = hand - Cadre carte en référence + cercle autour
         const isDetecting = !!landmarks && landmarks.length >= 21;
 
-        // Taille du cadre carte de référence (même taille que l'étape carte précédente)
-        const referenceCardWidth = step.distance === 'close'
-            ? containerWidth * 0.30
-            : containerWidth * 0.15;
-        const referenceCardHeight = referenceCardWidth / (CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM);
-
-        // Cercle autour du cadre carte (légèrement plus grand)
-        const circleSize = Math.max(referenceCardWidth, referenceCardHeight) * 1.3;
+        // Cercle guide autour du cadre (légèrement plus grand)
+        const circleSize = Math.max(referenceFrameWidth, referenceFrameHeight) * 1.4;
 
         // Ratio détecté vs attendu
         const distanceRatio = detectedPalmWidthPx && expectedPalmWidthPx
@@ -606,8 +430,8 @@ export function CalibrationWizard({
 
         // Couleur selon l'état
         const getCircleColor = () => {
-            if (isHandAtCorrectDistance) return 'rgb(34, 197, 94)'; // green-500
-            if (distanceRatio && distanceRatio >= (1 - DISTANCE_TOLERANCE) && distanceRatio <= (1 + DISTANCE_TOLERANCE)) {
+            if (isHandInFrame) return 'rgb(34, 197, 94)'; // green-500
+            if (distanceRatio && distanceRatio >= 0.6 && distanceRatio <= 1.5) {
                 return 'rgb(234, 179, 8)'; // yellow-500 (dans la zone, stabilisation)
             }
             if (isDetecting) return 'rgb(239, 68, 68)'; // red-500 (hors zone)
@@ -617,12 +441,12 @@ export function CalibrationWizard({
         // Message de guidance
         const getGuidanceMessage = () => {
             if (!isDetecting) return null;
-            if (isHandAtCorrectDistance) return null;
+            if (isHandInFrame) return null;
             if (!distanceRatio) return null;
 
-            if (distanceRatio < (1 - DISTANCE_TOLERANCE)) {
+            if (distanceRatio < 0.6) {
                 return { text: 'Rapprochez-vous', color: 'text-red-400' };
-            } else if (distanceRatio > (1 + DISTANCE_TOLERANCE)) {
+            } else if (distanceRatio > 1.5) {
                 return { text: 'Éloignez-vous', color: 'text-red-400' };
             } else {
                 return { text: 'Maintenez...', color: 'text-yellow-400' };
@@ -646,22 +470,24 @@ export function CalibrationWizard({
                         }}
                     />
 
-                    {/* Cadre carte de référence (fantôme) */}
+                    {/* Cadre de référence (représente une carte à cette distance) */}
                     <div
-                        className="border-2 border-dashed border-gray-400/50 bg-gray-500/10 relative rounded-lg"
+                        className="border-2 border-dashed border-cyan-400/60 bg-cyan-500/10 relative rounded-lg"
                         style={{
-                            width: referenceCardWidth,
-                            height: referenceCardHeight,
+                            width: referenceFrameWidth,
+                            height: referenceFrameHeight,
                         }}
                     >
-                        {/* Icône carte fantôme */}
-                        <CreditCard className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-gray-500/50" />
+                        {/* Label: taille de référence */}
+                        <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-black/70 px-2 py-0.5 rounded text-xs font-mono text-cyan-400">
+                            {CREDIT_CARD_WIDTH_MM}mm @ {step.distance === 'close' ? '20' : '40'}cm
+                        </div>
 
                         {/* Coins décoratifs */}
-                        <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-gray-400/50 rounded-tl" />
-                        <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-gray-400/50 rounded-tr" />
-                        <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-gray-400/50 rounded-bl" />
-                        <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-gray-400/50 rounded-br" />
+                        <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-cyan-400/60 rounded-tl" />
+                        <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-cyan-400/60 rounded-tr" />
+                        <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-cyan-400/60 rounded-bl" />
+                        <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-cyan-400/60 rounded-br" />
                     </div>
 
                     {/* Indicateur d'état au-dessus */}
@@ -669,9 +495,9 @@ export function CalibrationWizard({
                         {!isDetecting ? (
                             <div className="flex items-center gap-2">
                                 <Hand className="w-5 h-5 text-gray-400" />
-                                <span className="text-gray-400 text-sm">Montrez votre main</span>
+                                <span className="text-gray-400 text-sm">Montrez votre main ouverte</span>
                             </div>
-                        ) : isHandAtCorrectDistance ? (
+                        ) : isHandInFrame ? (
                             <div className="flex items-center gap-2">
                                 <Check className="w-5 h-5 text-green-500" />
                                 <span className="text-green-400 text-sm">Main capturée!</span>
@@ -684,7 +510,7 @@ export function CalibrationWizard({
                                 </div>
                                 {distanceRatio && (
                                     <span className="text-xs text-gray-500">
-                                        {(distanceRatio * 100).toFixed(0)}% (cible: 95-105%)
+                                        {(distanceRatio * 100).toFixed(0)}% (cible: 60-150%)
                                     </span>
                                 )}
                             </div>
@@ -697,12 +523,12 @@ export function CalibrationWizard({
                     </div>
 
                     {/* Barre de progression de stabilité */}
-                    {isDetecting && !isHandAtCorrectDistance && (
+                    {isDetecting && !isHandInFrame && (
                         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-48">
                             <div className="bg-gray-700 rounded-full h-2 overflow-hidden">
                                 <div
                                     className="bg-green-500 h-full transition-all duration-100"
-                                    style={{ width: `${(stabilityCounter / 15) * 100}%` }}
+                                    style={{ width: `${(stabilityCounter / 10) * 100}%` }}
                                 />
                             </div>
                             <p className="text-xs text-center text-gray-400 mt-1">
@@ -716,12 +542,12 @@ export function CalibrationWizard({
                 <div className="bg-black/70 p-4 rounded-t-lg">
                     <p className="text-center text-gray-300">
                         {step.distance === 'close'
-                            ? "Placez votre main à la même distance que la carte (~20cm)"
-                            : "Placez votre main à la même distance que la carte (~40cm)"
+                            ? "Placez votre main ouverte à ~20cm de la caméra"
+                            : "Reculez à ~40cm et placez votre main ouverte"
                         }
                     </p>
                     <p className="text-center text-xs text-gray-500 mt-1">
-                        Le cadre indique où était la carte - gardez la même distance
+                        Le cadre cyan représente {CREDIT_CARD_WIDTH_MM}mm à cette distance
                     </p>
                 </div>
             </div>
@@ -752,10 +578,10 @@ export function CalibrationWizard({
             <div className="px-4 py-2 bg-black/70">
                 <h2 className="text-lg font-semibold flex items-center gap-2">
                     {step.icon}
-                    Étape {currentStep}/4 : {step.title}
+                    Étape {currentStep}/2 : {step.title}
                 </h2>
                 <p className="text-sm text-gray-300 mt-1">
-                    {isOpenCVLoading ? "Chargement du système de détection..." : step.instruction}
+                    {step.instruction}
                 </p>
                 {/* Indicateurs de progression */}
                 <div className="mt-3">
@@ -779,11 +605,8 @@ export function CalibrationWizard({
 
                 {/* Bouton confirmer */}
                 {(() => {
-                    const isDisabled = (step.type === 'hand' && !isHandAtCorrectDistance) ||
-                                       (step.type === 'card' && !isCardAligned);
-                    const waitingMessage = step.type === 'card'
-                        ? 'En attente de la carte...'
-                        : 'En attente de la main...';
+                    const isDisabled = !isHandInFrame;
+                    const waitingMessage = 'En attente de la main...';
 
                     return (
                         <Button
