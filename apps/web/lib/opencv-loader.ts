@@ -98,8 +98,11 @@ export interface RotatedRect {
 let cvLoadPromise: Promise<OpenCVModule> | null = null;
 let cvInstance: OpenCVModule | null = null;
 
-// OpenCV.js CDN URL (smaller build, ~8MB)
+// OpenCV.js CDN URL
 const OPENCV_CDN_URL = 'https://docs.opencv.org/4.9.0/opencv.js';
+
+// Timeout for loading (30 seconds)
+const LOAD_TIMEOUT = 30000;
 
 /**
  * Load OpenCV.js lazily from CDN
@@ -108,72 +111,91 @@ const OPENCV_CDN_URL = 'https://docs.opencv.org/4.9.0/opencv.js';
 export async function loadOpenCV(): Promise<OpenCVModule> {
   // Return cached instance
   if (cvInstance) {
+    console.log('[OpenCV] Using cached instance');
     return cvInstance;
   }
 
   // Return existing promise if already loading
   if (cvLoadPromise) {
+    console.log('[OpenCV] Already loading, waiting...');
     return cvLoadPromise;
   }
 
-  // Check if already loaded globally
-  if (typeof window !== 'undefined' && (window as any).cv) {
+  // Check if already loaded globally (and ready)
+  if (typeof window !== 'undefined' && (window as any).cv && (window as any).cv.Mat) {
+    console.log('[OpenCV] Already loaded globally');
     cvInstance = (window as any).cv as OpenCVModule;
     return cvInstance;
   }
 
   // Start loading from CDN
   cvLoadPromise = new Promise<OpenCVModule>((resolve, reject) => {
-    console.log('[OpenCV] Loading OpenCV.js from CDN...');
+    console.log('[OpenCV] 🔄 Loading from CDN:', OPENCV_CDN_URL);
     const startTime = performance.now();
 
-    // Create script element
+    // Timeout handler
+    const timeoutId = setTimeout(() => {
+      console.error('[OpenCV] ❌ Loading timeout after 30s');
+      cvLoadPromise = null;
+      reject(new Error('OpenCV.js loading timeout'));
+    }, LOAD_TIMEOUT);
+
+    // Set up Module BEFORE loading script (OpenCV.js pattern)
+    (window as any).Module = {
+      onRuntimeInitialized: () => {
+        clearTimeout(timeoutId);
+        const cv = (window as any).cv;
+        if (cv && cv.Mat) {
+          const loadTime = (performance.now() - startTime).toFixed(0);
+          console.log(`[OpenCV] ✅ Ready via onRuntimeInitialized in ${loadTime}ms`);
+          cvInstance = cv as OpenCVModule;
+          resolve(cvInstance);
+        } else {
+          console.error('[OpenCV] ❌ onRuntimeInitialized called but cv.Mat not available');
+          reject(new Error('OpenCV initialization failed'));
+        }
+      }
+    };
+
+    // Create and load script
     const script = document.createElement('script');
     script.src = OPENCV_CDN_URL;
     script.async = true;
 
     script.onload = () => {
-      // OpenCV.js sets up cv on window and calls onRuntimeInitialized when ready
+      console.log('[OpenCV] 📦 Script loaded, waiting for WASM initialization...');
+
+      // Fallback: poll for cv.Mat if onRuntimeInitialized doesn't fire
+      let attempts = 0;
+      const maxAttempts = 100; // 10 seconds max
+
       const checkReady = () => {
+        attempts++;
         const cv = (window as any).cv;
+
         if (cv && cv.Mat) {
-          const loadTime = (performance.now() - startTime).toFixed(0);
-          console.log(`[OpenCV] ✅ Loaded in ${loadTime}ms`);
-          cvInstance = cv as OpenCVModule;
-          resolve(cvInstance);
-        } else if (cv && typeof cv.then === 'function') {
-          // cv is a promise (newer builds)
-          cv.then((readyCv: OpenCVModule) => {
+          clearTimeout(timeoutId);
+          if (!cvInstance) { // Avoid duplicate resolve
             const loadTime = (performance.now() - startTime).toFixed(0);
-            console.log(`[OpenCV] ✅ Loaded in ${loadTime}ms`);
-            cvInstance = readyCv;
-            (window as any).cv = readyCv; // Update global reference
+            console.log(`[OpenCV] ✅ Ready via polling in ${loadTime}ms (attempt ${attempts})`);
+            cvInstance = cv as OpenCVModule;
             resolve(cvInstance);
-          }).catch(reject);
-        } else {
-          // Not ready yet, wait a bit
+          }
+        } else if (attempts < maxAttempts) {
           setTimeout(checkReady, 100);
         }
+        // Don't reject here - let timeout handle failure
       };
 
-      // Set up the onRuntimeInitialized callback before checking
-      if (!(window as any).cv) {
-        (window as any).cv = {};
-      }
-      const originalCallback = (window as any).cv.onRuntimeInitialized;
-      (window as any).cv.onRuntimeInitialized = () => {
-        if (originalCallback) originalCallback();
-        checkReady();
-      };
-
-      // Also check immediately in case it's already ready
-      setTimeout(checkReady, 50);
+      // Start polling after a short delay
+      setTimeout(checkReady, 200);
     };
 
     script.onerror = (error) => {
-      console.error('[OpenCV] ❌ Failed to load from CDN:', error);
-      cvLoadPromise = null; // Allow retry
-      reject(new Error('Failed to load OpenCV.js from CDN'));
+      clearTimeout(timeoutId);
+      console.error('[OpenCV] ❌ Script load error:', error);
+      cvLoadPromise = null;
+      reject(new Error('Failed to load OpenCV.js script'));
     };
 
     document.head.appendChild(script);
