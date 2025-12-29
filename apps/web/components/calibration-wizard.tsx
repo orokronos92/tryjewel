@@ -225,7 +225,7 @@ export function CalibrationWizard({
     const expectedPalmWidthPx = currentPixelsPerMm ? PALM_WIDTH_MM * currentPixelsPerMm : null;
 
     // ==========================================================================
-    // DÉTECTION MEDIAPIPE - Calcul de la largeur de paume détectée
+    // DÉTECTION MEDIAPIPE - Capture quand main détectée et stable
     // ==========================================================================
     useEffect(() => {
         if (step.type !== 'hand' || !landmarks || landmarks.length < 21) {
@@ -235,7 +235,6 @@ export function CalibrationWizard({
         }
 
         // Largeur paume = distance entre index MCP (5) et pinky MCP (17)
-        // Les coordonnées sont normalisées (0-1), on les convertit en pixels
         const indexMcp = landmarks[5];
         const pinkyMcp = landmarks[17];
 
@@ -245,32 +244,23 @@ export function CalibrationWizard({
 
         setDetectedPalmWidthPx(palmWidth);
 
-        // Vérifier si la main est à la bonne distance
-        if (expectedPalmWidthPx) {
-            const ratio = palmWidth / expectedPalmWidthPx;
-            const isCorrect = ratio >= (1 - DISTANCE_TOLERANCE) && ratio <= (1 + DISTANCE_TOLERANCE);
+        // Main détectée → incrémenter stabilité (pas de vérification de taille)
+        setStabilityCounter(prev => Math.min(prev + 1, 30));
 
-            if (isCorrect) {
-                // Incrémenter le compteur de stabilité
-                setStabilityCounter(prev => Math.min(prev + 1, 30)); // Max 30 frames (~1 sec)
-            } else {
-                setStabilityCounter(0);
-            }
-
-            // Valider après 15 frames stables (~0.5 sec)
-            setIsHandAtCorrectDistance(stabilityCounter >= 15);
+        // Valider après 15 frames stables (~0.5 sec)
+        if (stabilityCounter >= 15) {
+            setIsHandAtCorrectDistance(true);
 
             // Capturer les landmarks quand stable
-            if (stabilityCounter >= 15 && !capturedLandmarks) {
+            if (!capturedLandmarks) {
                 setCapturedLandmarks([...landmarks]);
-                console.log('[Calibration] ✅ Main capturée à la bonne distance!', {
-                    detectedPx: palmWidth.toFixed(1),
-                    expectedPx: expectedPalmWidthPx.toFixed(1),
-                    ratio: ratio.toFixed(3),
+                console.log('[Calibration] ✅ Main capturée!', {
+                    palmWidthPx: palmWidth.toFixed(1),
+                    stabilityFrames: stabilityCounter,
                 });
             }
         }
-    }, [landmarks, step.type, expectedPalmWidthPx, containerWidth, containerHeight, stabilityCounter, capturedLandmarks]);
+    }, [landmarks, step.type, containerWidth, containerHeight, stabilityCounter, capturedLandmarks]);
 
     // Reset quand on change d'étape
     useEffect(() => {
@@ -427,86 +417,80 @@ export function CalibrationWizard({
             );
         }
 
-        // Type = hand - Cercle cible + détection MediaPipe
-        const circleSize = expectedPalmWidthPx || containerWidth * 0.35;
+        // Type = hand - Cadre carte en référence + cercle autour
         const isDetecting = !!landmarks && landmarks.length >= 21;
-        const matchRatio = detectedPalmWidthPx && expectedPalmWidthPx
-            ? detectedPalmWidthPx / expectedPalmWidthPx
-            : null;
 
-        // Couleur du cercle selon l'état
+        // Taille du cadre carte de référence (même taille que l'étape carte précédente)
+        const referenceCardWidth = step.distance === 'close'
+            ? containerWidth * 0.40
+            : containerWidth * 0.20;
+        const referenceCardHeight = referenceCardWidth / (CREDIT_CARD_WIDTH_MM / CREDIT_CARD_HEIGHT_MM);
+
+        // Cercle autour du cadre carte (légèrement plus grand)
+        const circleSize = Math.max(referenceCardWidth, referenceCardHeight) * 1.3;
+
+        // Couleur selon l'état
         const getCircleColor = () => {
             if (isHandAtCorrectDistance) return 'rgb(34, 197, 94)'; // green-500
-            if (matchRatio && matchRatio >= 0.85 && matchRatio <= 1.15) return 'rgb(234, 179, 8)'; // yellow-500
+            if (isDetecting) return 'rgb(234, 179, 8)'; // yellow-500
             return 'rgb(59, 130, 246)'; // blue-500
         };
 
         return (
             <div className="relative w-full h-full flex flex-col">
-                {/* Zone centrale - cercle cible */}
+                {/* Zone centrale */}
                 <div className="flex-1 flex items-center justify-center relative overflow-hidden">
-                    {/* Cercle cible */}
+                    {/* Cercle guide (autour du cadre carte) */}
                     <div
-                        className="rounded-full border-4 transition-all duration-300 flex items-center justify-center"
+                        className="absolute rounded-full border-4 border-dashed transition-all duration-300"
                         style={{
                             width: circleSize,
                             height: circleSize,
                             borderColor: getCircleColor(),
-                            backgroundColor: isHandAtCorrectDistance
-                                ? 'rgba(34, 197, 94, 0.2)'
-                                : 'rgba(59, 130, 246, 0.1)',
-                            boxShadow: isHandAtCorrectDistance
-                                ? '0 0 40px rgba(34, 197, 94, 0.5)'
-                                : '0 0 20px rgba(59, 130, 246, 0.3)',
+                            opacity: 0.6,
+                        }}
+                    />
+
+                    {/* Cadre carte de référence (fantôme) */}
+                    <div
+                        className="border-2 border-dashed border-gray-400/50 bg-gray-500/10 relative rounded-lg"
+                        style={{
+                            width: referenceCardWidth,
+                            height: referenceCardHeight,
                         }}
                     >
-                        {/* Icône au centre */}
+                        {/* Icône carte fantôme */}
+                        <CreditCard className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 text-gray-500/50" />
+
+                        {/* Coins décoratifs */}
+                        <div className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-gray-400/50 rounded-tl" />
+                        <div className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-gray-400/50 rounded-tr" />
+                        <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-gray-400/50 rounded-bl" />
+                        <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-gray-400/50 rounded-br" />
+                    </div>
+
+                    {/* Indicateur d'état au-dessus */}
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/80 px-4 py-2 rounded-lg">
                         {!isDetecting ? (
-                            <div className="text-center">
-                                <Hand className="w-16 h-16 text-gray-400 mx-auto mb-2" />
-                                <p className="text-gray-400 text-sm">Montrez votre main</p>
+                            <div className="flex items-center gap-2">
+                                <Hand className="w-5 h-5 text-gray-400" />
+                                <span className="text-gray-400 text-sm">Montrez votre main</span>
                             </div>
                         ) : isHandAtCorrectDistance ? (
-                            <div className="text-center">
-                                <Check className="w-20 h-20 text-green-500 mx-auto" />
+                            <div className="flex items-center gap-2">
+                                <Check className="w-5 h-5 text-green-500" />
+                                <span className="text-green-400 text-sm">Main capturée!</span>
                             </div>
                         ) : (
-                            <div className="text-center">
-                                <Loader2 className="w-12 h-12 text-yellow-500 mx-auto animate-spin" />
-                                <p className="text-yellow-400 text-sm mt-2">
-                                    {matchRatio && matchRatio < 0.85 ? 'Rapprochez-vous' :
-                                     matchRatio && matchRatio > 1.15 ? 'Éloignez-vous' :
-                                     'Ajustez la distance'}
-                                </p>
+                            <div className="flex items-center gap-2">
+                                <Loader2 className="w-5 h-5 text-yellow-500 animate-spin" />
+                                <span className="text-yellow-400 text-sm">Stabilisation...</span>
                             </div>
                         )}
                     </div>
 
-                    {/* Indicateur de taille détectée */}
-                    {isDetecting && detectedPalmWidthPx && expectedPalmWidthPx && (
-                        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/80 px-4 py-2 rounded-lg">
-                            <div className="text-sm font-mono">
-                                <span className="text-gray-400">Détecté: </span>
-                                <span className={matchRatio && matchRatio >= 0.85 && matchRatio <= 1.15 ? 'text-green-400' : 'text-yellow-400'}>
-                                    {detectedPalmWidthPx.toFixed(0)}px
-                                </span>
-                                <span className="text-gray-500 mx-2">/</span>
-                                <span className="text-gray-400">Cible: </span>
-                                <span className="text-blue-400">{expectedPalmWidthPx.toFixed(0)}px</span>
-                            </div>
-                            {matchRatio && (
-                                <div className="text-xs text-center mt-1">
-                                    <span className={matchRatio >= 0.85 && matchRatio <= 1.15 ? 'text-green-400' : 'text-yellow-400'}>
-                                        {(matchRatio * 100).toFixed(0)}%
-                                    </span>
-                                    <span className="text-gray-500"> (cible: 85-115%)</span>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
                     {/* Barre de progression de stabilité */}
-                    {isDetecting && matchRatio && matchRatio >= 0.85 && matchRatio <= 1.15 && (
+                    {isDetecting && !isHandAtCorrectDistance && (
                         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 w-48">
                             <div className="bg-gray-700 rounded-full h-2 overflow-hidden">
                                 <div
@@ -515,7 +499,7 @@ export function CalibrationWizard({
                                 />
                             </div>
                             <p className="text-xs text-center text-gray-400 mt-1">
-                                {stabilityCounter < 15 ? 'Maintenez la position...' : 'Capturé!'}
+                                Maintenez la position...
                             </p>
                         </div>
                     )}
@@ -525,15 +509,13 @@ export function CalibrationWizard({
                 <div className="bg-black/70 p-4 rounded-t-lg">
                     <p className="text-center text-gray-300">
                         {step.distance === 'close'
-                            ? "Placez votre paume ouverte à ~20cm pour qu'elle remplisse le cercle"
-                            : "Reculez à ~40cm pour que votre paume remplisse le cercle"
+                            ? "Placez votre main à la même distance que la carte (~20cm)"
+                            : "Placez votre main à la même distance que la carte (~40cm)"
                         }
                     </p>
-                    {currentPixelsPerMm && (
-                        <p className="text-center text-xs text-gray-500 mt-1">
-                            Cercle = {PALM_WIDTH_MM}mm × {currentPixelsPerMm.toFixed(2)} px/mm = {circleSize.toFixed(0)}px
-                        </p>
-                    )}
+                    <p className="text-center text-xs text-gray-500 mt-1">
+                        Le cadre indique où était la carte - gardez la même distance
+                    </p>
                 </div>
             </div>
         );
