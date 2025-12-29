@@ -491,15 +491,18 @@ export function CalibrationWizard({
 
             return (
                 <div className="relative w-full h-full flex flex-col">
-                    {/* Canvas debug pour visualiser les edges Canny (vert) et rectangle détecté (rouge) */}
-                    <canvas
-                        ref={debugCanvasRef}
-                        className="absolute inset-0 pointer-events-none z-10"
-                        style={{ width: '100%', height: '100%' }}
-                    />
-
                     {/* Zone centrale - cadre de la carte avec détection */}
                     <div className="flex-1 flex items-center justify-center relative">
+                        {/* Canvas debug - couvre exactement la zone du cadre + marge */}
+                        <canvas
+                            ref={debugCanvasRef}
+                            className="absolute pointer-events-none z-20"
+                            style={{
+                                width: fixedCardWidth * 1.4,  // +20% margin each side
+                                height: fixedCardHeight * 1.4,
+                            }}
+                        />
+
                         {/* Cadre cible */}
                         <div
                             className="border-2 relative rounded-lg transition-all duration-300"

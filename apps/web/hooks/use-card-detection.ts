@@ -678,65 +678,60 @@ function findBestCardContour(
 function drawDebugVisualization(
     debugCanvas: HTMLCanvasElement,
     edges: Uint8Array,
-    cropWidth: number,  // Size of the cropped region we analyzed
+    cropWidth: number,  // Size of the cropped region (video pixels)
     cropHeight: number,
     rect: { x: number; y: number; w: number; h: number } | null,
-    // Where to draw in container coords
-    drawX: number,
-    drawY: number,
-    drawWidth: number,
-    drawHeight: number,
-    containerWidth: number,
-    containerHeight: number
+    // Canvas display dimensions
+    canvasDisplayWidth: number,
+    canvasDisplayHeight: number
 ): void {
     const ctx = debugCanvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas size to match container
-    debugCanvas.width = containerWidth;
-    debugCanvas.height = containerHeight;
+    // Set canvas internal resolution to match display size for sharp rendering
+    debugCanvas.width = canvasDisplayWidth;
+    debugCanvas.height = canvasDisplayHeight;
 
     // Clear
-    ctx.clearRect(0, 0, containerWidth, containerHeight);
+    ctx.clearRect(0, 0, canvasDisplayWidth, canvasDisplayHeight);
 
-    // Scale factors from crop region to draw region
-    const scaleX = drawWidth / cropWidth;
-    const scaleY = drawHeight / cropHeight;
+    // Scale factors from video pixels to canvas display pixels
+    const scaleX = canvasDisplayWidth / cropWidth;
+    const scaleY = canvasDisplayHeight / cropHeight;
 
-    // Draw edges in green - only in the crop region area
-    const edgeImageData = ctx.createImageData(containerWidth, containerHeight);
+    // Draw edges in green
+    const edgeImageData = ctx.createImageData(canvasDisplayWidth, canvasDisplayHeight);
     for (let y = 0; y < cropHeight; y++) {
         for (let x = 0; x < cropWidth; x++) {
             if (edges[y * cropWidth + x] === 255) {
-                // Scale to container coordinates within the draw region
-                const cx = Math.floor(drawX + x * scaleX);
-                const cy = Math.floor(drawY + y * scaleY);
-                if (cx >= 0 && cx < containerWidth && cy >= 0 && cy < containerHeight) {
-                    const idx = (cy * containerWidth + cx) * 4;
+                const cx = Math.floor(x * scaleX);
+                const cy = Math.floor(y * scaleY);
+                if (cx >= 0 && cx < canvasDisplayWidth && cy >= 0 && cy < canvasDisplayHeight) {
+                    const idx = (cy * canvasDisplayWidth + cx) * 4;
                     edgeImageData.data[idx] = 0;       // R
                     edgeImageData.data[idx + 1] = 255; // G
                     edgeImageData.data[idx + 2] = 0;   // B
-                    edgeImageData.data[idx + 3] = 180; // A
+                    edgeImageData.data[idx + 3] = 200; // A
                 }
             }
         }
     }
     ctx.putImageData(edgeImageData, 0, 0);
 
-    // Draw detected rectangle in red (in draw region coords)
+    // Draw detected rectangle in red
     if (rect) {
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 3;
         ctx.strokeRect(
-            drawX + rect.x * scaleX,
-            drawY + rect.y * scaleY,
+            rect.x * scaleX,
+            rect.y * scaleY,
             rect.w * scaleX,
             rect.h * scaleY
         );
 
         // Draw center cross
-        const cx = drawX + (rect.x + rect.w / 2) * scaleX;
-        const cy = drawY + (rect.y + rect.h / 2) * scaleY;
+        const cx = (rect.x + rect.w / 2) * scaleX;
+        const cy = (rect.y + rect.h / 2) * scaleY;
         ctx.beginPath();
         ctx.moveTo(cx - 10, cy);
         ctx.lineTo(cx + 10, cy);
@@ -745,12 +740,10 @@ function drawDebugVisualization(
         ctx.stroke();
     }
 
-    // Draw the analysis region border (cyan dashed)
+    // Draw border to show canvas bounds (cyan)
     ctx.strokeStyle = 'cyan';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
-    ctx.strokeRect(drawX, drawY, drawWidth, drawHeight);
-    ctx.setLineDash([]);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, canvasDisplayWidth - 2, canvasDisplayHeight - 2);
 }
 
 // =============================================================================
@@ -983,19 +976,18 @@ export function useCardDetection({
         );
 
         // Draw debug visualization if canvas provided
+        // Canvas covers frame area + 20% margin on each side (= 1.4x frame size)
         if (debugCanvasRef?.current) {
+            const canvasDisplayWidth = expectedFrameWidth * 1.4;
+            const canvasDisplayHeight = expectedFrameHeight * 1.4;
             drawDebugVisualization(
                 debugCanvasRef.current,
                 result.edges,
                 result.cropWidth,
                 result.cropHeight,
                 result.rect,
-                result.drawX,
-                result.drawY,
-                result.drawWidth,
-                result.drawHeight,
-                containerWidth,
-                containerHeight
+                canvasDisplayWidth,
+                canvasDisplayHeight
             );
         }
 
