@@ -524,18 +524,6 @@ export function CalibrationWizard({
                             )}
                         </div>
 
-                        {/* Contour de la carte détectée (overlay) */}
-                        {detectedCard && !isCardAligned && (
-                            <div
-                                className="absolute border-2 border-dashed border-yellow-500 rounded-lg pointer-events-none transition-all duration-100"
-                                style={{
-                                    left: detectedCard.x,
-                                    top: detectedCard.y,
-                                    width: detectedCard.width,
-                                    height: detectedCard.height,
-                                }}
-                            />
-                        )}
 
                         {/* Indicateur d'état au-dessus */}
                         <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/80 px-4 py-2 rounded-lg">
