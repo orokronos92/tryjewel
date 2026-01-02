@@ -283,7 +283,7 @@ class DebugLogger {
 // Singleton
 export const dbg = new DebugLogger();
 
-// Exposer sur window pour accès console
+// Exposer sur window pour accès console (arDbg pour éviter conflit avec MediaPipe qui utilise 'dbg')
 if (typeof window !== "undefined") {
-  (window as unknown as { dbg: DebugLogger }).dbg = dbg;
+  (window as unknown as { arDbg: DebugLogger }).arDbg = dbg;
 }
