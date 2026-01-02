@@ -7,6 +7,7 @@ import { useSkeletonAdjustmentStore } from "@/stores/skeleton-adjustment-store";
 import { useRingAdjustmentStore } from "@/stores/ring-adjustment-store";
 import { useCameraStore } from "@/stores/camera-store";
 import { useCalibrationStore } from "@/stores/calibration-store";
+import { dbg } from "@/lib/debug-logger";
 import * as THREE from "three";
 // @ts-expect-error
 
@@ -352,6 +353,7 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
 
         const animate = () => {
             animationIdRef.current = requestAnimationFrame(animate);
+            const tStart = performance.now(); // ⏱️ TIMING: début
 
             if (ctx) ctx.clearRect(0, 0, width, height);
 
@@ -463,6 +465,8 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
                 bonesDataRef.current.set(bone.name, { position: fPos, quaternion: fQuat, direction: dir, length: len });
             });
 
+            const tBones = performance.now(); // ⏱️ TIMING: après bones
+
             // occluders
             if (PERF_OPTIONS.ENABLE_OCCLUDERS) {
                 const fingerDepths: { name: string; z: number }[] = [];
@@ -509,6 +513,8 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
                     }
                 });
             }
+
+            const tOccluders = performance.now(); // ⏱️ TIMING: après occluders
 
             // skeleton draw - ⚡ Conditionné au toggle
             if (PERF_OPTIONS.ENABLE_SKELETON_2D && ctx && showSkeletonRef.current) {
@@ -609,6 +615,8 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             const baseScale = boneData.length * 8 * effScale * zParallaxScale;
             ringRef.current.scale.setScalar(baseScale);
 
+            const tRing = performance.now(); // ⏱️ TIMING: après ring
+
             // =========================
             // ✅ DEBUG BONE AXES & LOGGING
             // =========================
@@ -627,6 +635,17 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             }
 
             renderer.render(scene, camera);
+
+            const tGL = performance.now(); // ⏱️ TIMING: après GL
+
+            // 🔍 DEBUG: Log render timing
+            dbg.render({
+                total: tGL - tStart,
+                bones: tBones - tStart,
+                occluders: tOccluders - tBones,
+                ring: tRing - tOccluders,
+                gl: tGL - tRing,
+            });
         };
 
         animate();

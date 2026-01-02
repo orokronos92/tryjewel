@@ -10,6 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useCameraStore } from '@/stores/camera-store';
+import { dbg } from '@/lib/debug-logger';
 
 export type FacingMode = 'user' | 'environment';
 
@@ -143,6 +144,44 @@ export function useWebcam(): UseWebcamReturn {
         videoRef.current.srcObject = mediaStream;
         await videoRef.current.play().catch(() => { });
         setVideoReady(true);
+
+        // 🔍 DEBUG: Log startup info
+        const track = mediaStream.getVideoTracks()[0];
+        const settings = track?.getSettings();
+        dbg.startup({
+          device: {
+            isMobile,
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            cores: navigator.hardwareConcurrency || 0,
+            memory: (navigator as unknown as { deviceMemory?: number }).deviceMemory || null,
+          },
+          config: {
+            frameSkip: isMobile ? 2 : 1,
+            useWorker: true,
+            occludersEnabled: true,
+          },
+          camera: {
+            requested: {
+              width: isMobile ? 640 : 1280,
+              height: isMobile ? 480 : 720,
+            },
+            actual: {
+              width: settings?.width || 0,
+              height: settings?.height || 0,
+            },
+            facingMode: mode,
+            label: track?.label || 'unknown',
+          },
+        });
+
+        dbg.cam({
+          event: 'started',
+          requested: { width: isMobile ? 640 : 1280, height: isMobile ? 480 : 720 },
+          actual: { width: settings?.width || 0, height: settings?.height || 0 },
+          facingMode: mode,
+          label: track?.label || 'unknown',
+        });
       }
 
       return true;
@@ -167,6 +206,9 @@ export function useWebcam(): UseWebcamReturn {
   // =========================================================================
 
   const stopCamera = useCallback(() => {
+    // 🔍 DEBUG: Log camera stop
+    dbg.cam({ event: 'stopped' });
+
     // 1. Stopper via store
     const stream = useCameraStore.getState().camera.stream;
     if (stream) {
@@ -278,6 +320,17 @@ export function useWebcam(): UseWebcamReturn {
         videoRef.current.srcObject = mediaStream;
         await videoRef.current.play().catch(() => { });
         setVideoReady(true);
+
+        // 🔍 DEBUG: Log camera switch
+        const track = mediaStream.getVideoTracks()[0];
+        const settings = track?.getSettings();
+        dbg.cam({
+          event: 'switched',
+          requested: { width: isMobile ? 640 : 1280, height: isMobile ? 480 : 720 },
+          actual: { width: settings?.width || 0, height: settings?.height || 0 },
+          facingMode: newMode,
+          label: track?.label || 'unknown',
+        });
       }
 
     } catch (err) {
@@ -291,7 +344,7 @@ export function useWebcam(): UseWebcamReturn {
     }
 
     setIsLoading(false);
-  }, [cameras, currentCameraIndex, stopCamera, setStream, setCameraActive, setFacingMode, setVideoReady, setError, startCamera]);
+  }, [cameras, currentCameraIndex, stopCamera, setStream, setCameraActive, setFacingMode, setVideoReady, setError, startCamera, isMobile]);
 
   // =========================================================================
   // SYNC VIDEO ELEMENT

@@ -15,6 +15,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 
 import { useCameraStore } from "@/stores/camera-store";
+import { dbg } from "@/lib/debug-logger";
 import { useSkeletonAdjustmentStore } from "@/stores/skeleton-adjustment-store";
 import { useJewelryStore } from "@/stores/jewelry-store";
 import { Vector3OneEuroFilter, QuaternionOneEuroFilter } from "@/lib/one-euro-filter";
@@ -605,6 +606,8 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
         if (frameCountRef.current % skip !== 0) return;
 
         const t0 = performance.now();
+        let tCapture = t0;
+        let tMediapipe = t0;
 
         try {
             const nowMs = performance.now();
@@ -625,6 +628,7 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
                     resizeWidth: MEDIAPIPE_INPUT_WIDTH,
                     resizeHeight: MEDIAPIPE_INPUT_HEIGHT,
                 });
+                tCapture = performance.now(); // ⏱️ TIMING: après capture
 
                 // Envoyer au worker et attendre la réponse
                 const workerResult = await new Promise<{
@@ -664,6 +668,7 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
                     );
                 });
 
+                tMediapipe = performance.now(); // ⏱️ TIMING: après mediapipe
                 landmarks = workerResult.landmarks;
                 worldLandmarks = workerResult.worldLandmarks;
                 handedness = workerResult.handedness;
@@ -683,6 +688,7 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
                     offscreenCtx.drawImage(video, 0, 0, MEDIAPIPE_INPUT_WIDTH, MEDIAPIPE_INPUT_HEIGHT);
                     inputSource = offscreenCanvas;
                 }
+                tCapture = performance.now(); // ⏱️ TIMING: après capture
 
                 let result: TasksHandLandmarkerResult;
                 try {
@@ -690,6 +696,7 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
                 } catch (err) {
                     return;
                 }
+                tMediapipe = performance.now(); // ⏱️ TIMING: après mediapipe
 
                 const handed = pickBestHandedness(result);
                 handedness = handed.label;
@@ -719,6 +726,8 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
                 );
             }
 
+            const tTransform = performance.now(); // ⏱️ TIMING: après transform
+
             const trackingResult: TrackingResult = {
                 success: !!handResult,
                 hand_result: handResult,
@@ -735,10 +744,32 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
             const fpsCounter = fpsCounterRef.current;
             fpsCounter.frames += 1;
             const elapsed = nowMs - fpsCounter.lastTime;
+            let currentFps = fps;
             if (elapsed >= 1000) {
-                setFps(Math.round((fpsCounter.frames * 1000) / elapsed));
+                currentFps = Math.round((fpsCounter.frames * 1000) / elapsed);
+                setFps(currentFps);
                 fpsCounter.frames = 0;
                 fpsCounter.lastTime = nowMs;
+            }
+
+            // 🔍 DEBUG: Log frame timing
+            dbg.frame({
+                total: tTransform - t0,
+                capture: tCapture - t0,
+                mediapipe: tMediapipe - tCapture,
+                transform: tTransform - tMediapipe,
+                fps: currentFps,
+                skipped: false,
+                handsDetected: handResult ? 1 : 0,
+            });
+
+            // 🔍 DEBUG: Log tracking quality
+            if (jewelryPos) {
+                dbg.track({
+                    confidence: handednessScore,
+                    palm: jewelryPos.direction.z > 0, // Approximation basée sur la direction
+                    handedness,
+                });
             }
 
             processingTimesRef.current.push(trackingResult.processing_time_ms);
@@ -746,7 +777,7 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
         } catch (e: any) {
             // Silent error
         }
-    }, [calculateJewelryTransform]);
+    }, [calculateJewelryTransform, fps]);
 
     useEffect(() => {
         if (!isTracking) return;
