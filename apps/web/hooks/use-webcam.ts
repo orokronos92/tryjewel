@@ -10,7 +10,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useCameraStore } from '@/stores/camera-store';
-import { dbg } from '@/lib/debug-logger';
+import { arDbg } from '@/lib/debug-logger';
 
 export type FacingMode = 'user' | 'environment';
 
@@ -148,7 +148,7 @@ export function useWebcam(): UseWebcamReturn {
         // 🔍 DEBUG: Log startup info
         const track = mediaStream.getVideoTracks()[0];
         const settings = track?.getSettings();
-        dbg.startup({
+        arDbg.startup({
           device: {
             isMobile,
             userAgent: navigator.userAgent,
@@ -175,7 +175,7 @@ export function useWebcam(): UseWebcamReturn {
           },
         });
 
-        dbg.cam({
+        arDbg.cam({
           event: 'started',
           requested: { width: isMobile ? 640 : 1280, height: isMobile ? 480 : 720 },
           actual: { width: settings?.width || 0, height: settings?.height || 0 },
@@ -207,7 +207,7 @@ export function useWebcam(): UseWebcamReturn {
 
   const stopCamera = useCallback(() => {
     // 🔍 DEBUG: Log camera stop
-    dbg.cam({ event: 'stopped' });
+    arDbg.cam({ event: 'stopped' });
 
     // 1. Stopper via store
     const stream = useCameraStore.getState().camera.stream;
@@ -324,7 +324,7 @@ export function useWebcam(): UseWebcamReturn {
         // 🔍 DEBUG: Log camera switch
         const track = mediaStream.getVideoTracks()[0];
         const settings = track?.getSettings();
-        dbg.cam({
+        arDbg.cam({
           event: 'switched',
           requested: { width: isMobile ? 640 : 1280, height: isMobile ? 480 : 720 },
           actual: { width: settings?.width || 0, height: settings?.height || 0 },

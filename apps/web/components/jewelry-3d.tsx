@@ -7,7 +7,7 @@ import { useSkeletonAdjustmentStore } from "@/stores/skeleton-adjustment-store";
 import { useRingAdjustmentStore } from "@/stores/ring-adjustment-store";
 import { useCameraStore } from "@/stores/camera-store";
 import { useCalibrationStore } from "@/stores/calibration-store";
-import { dbg } from "@/lib/debug-logger";
+import { arDbg } from "@/lib/debug-logger";
 import * as THREE from "three";
 // @ts-expect-error
 
@@ -639,7 +639,7 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             const tGL = performance.now(); // ⏱️ TIMING: après GL
 
             // 🔍 DEBUG: Log render timing
-            dbg.render({
+            arDbg.render({
                 total: tGL - tStart,
                 bones: tBones - tStart,
                 occluders: tOccluders - tBones,

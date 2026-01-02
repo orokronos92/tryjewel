@@ -4,14 +4,14 @@
  * =============================================================================
  *
  * Usage dans le code:
- *   import { dbg } from '@/lib/debug-logger';
- *   dbg.frame({ total: 45, capture: 3, mediapipe: 38, transform: 4, fps: 22 });
+ *   import { arDbg } from '@/lib/debug-logger';
+ *   arDbg.frame({ total: 45, capture: 3, mediapipe: 38, transform: 4, fps: 22 });
  *
  * Usage dans la console browser:
- *   dbg.status()           // Voir l'état
- *   dbg.enable('render')   // Activer une catégorie
- *   dbg.disable('frame')   // Désactiver une catégorie
- *   dbg.setThrottle(1000)  // Changer le throttle
+ *   arDbg.status()           // Voir l'état
+ *   arDbg.enable('render')   // Activer une catégorie
+ *   arDbg.disable('frame')   // Désactiver une catégorie
+ *   arDbg.setThrottle(1000)  // Changer le throttle
  */
 
 type LogCategory = "startup" | "frame" | "render" | "track" | "cam";
@@ -280,10 +280,10 @@ class DebugLogger {
   }
 }
 
-// Singleton
-export const dbg = new DebugLogger();
+// Singleton (arDbg pour éviter conflit avec MediaPipe qui utilise 'dbg' en interne)
+export const arDbg = new DebugLogger();
 
-// Exposer sur window pour accès console (arDbg pour éviter conflit avec MediaPipe qui utilise 'dbg')
+// Exposer sur window pour accès console
 if (typeof window !== "undefined") {
-  (window as unknown as { arDbg: DebugLogger }).arDbg = dbg;
+  (window as unknown as { arDbg: DebugLogger }).arDbg = arDbg;
 }

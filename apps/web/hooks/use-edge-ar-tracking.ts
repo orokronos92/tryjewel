@@ -15,7 +15,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as THREE from "three";
 
 import { useCameraStore } from "@/stores/camera-store";
-import { dbg } from "@/lib/debug-logger";
+import { arDbg } from "@/lib/debug-logger";
 import { useSkeletonAdjustmentStore } from "@/stores/skeleton-adjustment-store";
 import { useJewelryStore } from "@/stores/jewelry-store";
 import { Vector3OneEuroFilter, QuaternionOneEuroFilter } from "@/lib/one-euro-filter";
@@ -757,7 +757,7 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
             }
 
             // 🔍 DEBUG: Log frame timing
-            dbg.frame({
+            arDbg.frame({
                 total: tTransform - t0,
                 capture: tCapture - t0,
                 mediapipe: tMediapipe - tCapture,
@@ -769,7 +769,7 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
 
             // 🔍 DEBUG: Log tracking quality
             if (jewelryPos) {
-                dbg.track({
+                arDbg.track({
                     confidence: handednessScore,
                     palm: jewelryPos.direction.z > 0, // Approximation basée sur la direction
                     handedness,
