@@ -145,16 +145,6 @@ export const usePerformanceStore = create<PerformanceStoreState>()(
                 initialTier = Math.max(preferences.minTier, initialTier) as PerformanceTier;
                 initialTier = Math.min(preferences.maxTier, initialTier) as PerformanceTier;
                 
-                console.log('[PerformanceStore] ðŸŽ¯ Initialized:', {
-                    recommendedTier: capabilities.recommendedTier,
-                    initialTier,
-                    capabilities: {
-                        cpuCores: capabilities.cpuCores,
-                        gpuTier: capabilities.gpuTier,
-                        isMobile: capabilities.isMobile,
-                    },
-                });
-                
                 set({
                     deviceCapabilities: capabilities,
                     fpsTracker: tracker,
@@ -188,13 +178,7 @@ export const usePerformanceStore = create<PerformanceStoreState>()(
                 ) as PerformanceTier;
                 
                 const config = getTierConfig(clampedTier);
-                
-                console.log('[PerformanceStore] ðŸ“Š Tier change:', {
-                    from: get().currentTier,
-                    to: clampedTier,
-                    reason,
-                });
-                
+
                 set((state) => ({
                     currentTier: clampedTier,
                     currentConfig: config,

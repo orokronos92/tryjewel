@@ -49,7 +49,6 @@ export function useScreenshot(): UseScreenshotReturn {
 
       return dataUrl;
     } catch (error) {
-      console.error('Screenshot capture failed:', error);
       return null;
     } finally {
       setIsCapturing(false);

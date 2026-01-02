@@ -155,7 +155,6 @@ export const useGalleryStore = create<GalleryStoreState>()(
             },
           }));
         } catch (error) {
-          console.error('Failed to save item:', error);
           throw error;
         }
       },
@@ -175,7 +174,6 @@ export const useGalleryStore = create<GalleryStoreState>()(
             },
           }));
         } catch (error) {
-          console.error('Failed to remove item:', error);
           throw error;
         }
       },
@@ -192,7 +190,6 @@ export const useGalleryStore = create<GalleryStoreState>()(
             },
           }));
         } catch (error) {
-          console.error('Failed to clear gallery:', error);
           throw error;
         }
       },
@@ -214,7 +211,6 @@ export const useGalleryStore = create<GalleryStoreState>()(
             },
           }));
         } catch (error) {
-          console.error('Failed to update item:', error);
           throw error;
         }
       },

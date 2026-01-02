@@ -121,8 +121,6 @@ export class FingerOccluderManager {
             this.scene.add(mesh);
             this.occluders.set(config.boneName, mesh);
         });
-        
-        console.log('[FingerOccluders v1.6] ✅ Created', this.occluders.size, 'occluders');
     }
     
     // =========================================================================
@@ -172,15 +170,7 @@ export class FingerOccluderManager {
         fingerDepths.forEach((fd, index) => {
             depthOrder.set(fd.name, index);
         });
-        
-        // Debug log (toutes les 60 frames)
-        if (this.frameCount % 60 === 0) {
-            console.log('[FingerOccluders v1.7] Depth order (Z asc):', {
-                order: fingerDepths.map(fd => `${fd.name}(z=${fd.z.toFixed(3)})`).join(' → '),
-                ringFingerRank: depthOrder.get(ringFingerName)
-            });
-        }
-        
+
         return depthOrder;
     }
     
@@ -305,7 +295,6 @@ export class FingerOccluderManager {
             this.scene.remove(mesh);
         });
         this.occluders.clear();
-        console.log('[FingerOccluders v1.6] 🧹 Disposed');
     }
 }
 

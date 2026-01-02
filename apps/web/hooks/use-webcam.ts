@@ -93,13 +93,11 @@ export function useWebcam(): UseWebcamReturn {
           };
         });
 
-        console.log('[useWebcam v6] 📷 Cameras found:', cameraList);
         setCameras(cameraList);
         setCanSwitchCamera(cameraList.length > 1);
         setIsMobile(isMobile);
 
       } catch (err) {
-        console.error('[useWebcam v6] Enumerate error:', err);
         setIsMobile(isMobile);
         if (isMobile) setCanSwitchCamera(true);
       }
@@ -113,8 +111,6 @@ export function useWebcam(): UseWebcamReturn {
   // =========================================================================
 
   const startWithMode = useCallback(async (mode: FacingMode): Promise<boolean> => {
-    console.log('[useWebcam v6] 🎥 Start mode:', mode);
-
     try {
       // ⚡ Optimisation Résolution: 640x480 sur mobile pour MediaPipe
       const videoConstraints: MediaTrackConstraints = isMobile
@@ -149,13 +145,10 @@ export function useWebcam(): UseWebcamReturn {
         setVideoReady(true);
       }
 
-      const track = mediaStream.getVideoTracks()[0];
-      console.log('[useWebcam v6] ✅ Started:', track?.label);
       return true;
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Erreur caméra';
-      console.error('[useWebcam v6] ❌', msg);
       setLocalError(msg);
       setError(msg);
       return false;
@@ -174,14 +167,11 @@ export function useWebcam(): UseWebcamReturn {
   // =========================================================================
 
   const stopCamera = useCallback(() => {
-    console.log('[useWebcam v6] 🛑 STOP complet...');
-
     // 1. Stopper via store
     const stream = useCameraStore.getState().camera.stream;
     if (stream) {
       stream.getTracks().forEach(track => {
         track.stop();
-        console.log('[useWebcam v6] Track stopped:', track.label);
       });
     }
 
@@ -195,8 +185,6 @@ export function useWebcam(): UseWebcamReturn {
     setStream(null);
     setCameraActive(false);
     setVideoReady(false);
-
-    console.log('[useWebcam v6] ✅ Stopped');
   }, [setStream, setCameraActive, setVideoReady]);
 
   // =========================================================================
@@ -249,12 +237,7 @@ export function useWebcam(): UseWebcamReturn {
   // =========================================================================
 
   const switchFacingMode = useCallback(async () => {
-    console.log('[useWebcam v6] 🔄 Switch par deviceId...');
-    console.log('[useWebcam v6] Cameras disponibles:', cameras);
-    console.log('[useWebcam v6] Index actuel:', currentCameraIndex);
-
     if (cameras.length < 2) {
-      console.log('[useWebcam v6] ⚠️ Pas assez de caméras');
       return;
     }
 
@@ -266,14 +249,11 @@ export function useWebcam(): UseWebcamReturn {
     stopCamera();
 
     // 2. Délai pour libérer la caméra - 3000ms pour Samsung
-    console.log('[useWebcam v6] ⏳ Wait 3000ms...');
     await new Promise(r => setTimeout(r, 3000));
 
     // 3. Passer à la caméra suivante
     const nextIndex = (currentCameraIndex + 1) % cameras.length;
     const nextCamera = cameras[nextIndex];
-
-    console.log('[useWebcam v6] 📷 Switch to:', nextCamera.label, '(', nextCamera.deviceId.slice(0, 8), ')');
 
     try {
       // ⚡ UTILISER DEVICEID + Résolution optimisée
@@ -300,11 +280,8 @@ export function useWebcam(): UseWebcamReturn {
         setVideoReady(true);
       }
 
-      console.log('[useWebcam v6] ✅ Switch OK:', nextCamera.label);
-
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Erreur switch';
-      console.error('[useWebcam v6] ❌ Switch failed:', msg);
       setLocalError(msg);
       setError(msg);
 

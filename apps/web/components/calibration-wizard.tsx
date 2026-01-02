@@ -179,14 +179,6 @@ export function CalibrationWizard({
         const circumferenceMm = ellipseCircumference(widthMm, depthMm);
         const ringSizes = circumferenceToRingSizes(circumferenceMm);
 
-        console.log(`[Calibration] 📐 ${fingerName}:`, {
-            widthPx: widthPx.toFixed(1),
-            widthMm: widthMm.toFixed(1),
-            depthMm: depthMm.toFixed(1),
-            circumferenceMm: circumferenceMm.toFixed(1),
-            euSize: ringSizes.eu,
-        });
-
         return {
             widthPx,
             widthMm,
@@ -199,9 +191,6 @@ export function CalibrationWizard({
     // Index de l'étape (0 ou 1 pour les 2 étapes)
     const stepIndex = Math.max(0, Math.min(1, currentStep - 1));
     const step = STEPS[stepIndex];
-
-    // Debug log
-    console.log('[CalibrationWizard] 🎯 Render:', { currentStep, stepIndex, stepTitle: step.title });
 
     // ==========================================================================
     // CALCUL DU CADRE DE RÉFÉRENCE (basé sur FOV assumé)
@@ -225,7 +214,6 @@ export function CalibrationWizard({
     // ⚡ FIX: Synchroniser le store si currentStep est invalide
     useEffect(() => {
         if (currentStep < 1) {
-            console.log('[CalibrationWizard] ⚠️ currentStep invalide, correction à 1');
             setCurrentStep(1);
         }
     }, [currentStep, setCurrentStep]);
@@ -234,7 +222,6 @@ export function CalibrationWizard({
     useEffect(() => {
         if (videoElement && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
             setVideoDimensions(videoElement.videoWidth, videoElement.videoHeight);
-            console.log('[Calibration] 📹 Dimensions vidéo enregistrées:', `${videoElement.videoWidth}x${videoElement.videoHeight}`);
         }
     }, [videoElement, setVideoDimensions]);
 
@@ -266,14 +253,6 @@ export function CalibrationWizard({
         const ratio = palmWidth / expectedPalmWidthPx;
         const isInFrame = ratio >= (1 - DISTANCE_TOLERANCE) && ratio <= (1 + DISTANCE_TOLERANCE);
 
-        console.log('[Calibration] 📏 Main détectée:', {
-            palmWidthPx: palmWidth.toFixed(1),
-            expectedPx: expectedPalmWidthPx.toFixed(1),
-            ratio: ratio.toFixed(3),
-            tolerance: `±${DISTANCE_TOLERANCE * 100}%`,
-            isInFrame,
-        });
-
         if (isInFrame) {
             // Incrémenter le compteur de stabilité
             setStabilityCounter(prev => Math.min(prev + 1, 20));
@@ -289,11 +268,6 @@ export function CalibrationWizard({
             // Capturer les landmarks quand stable
             if (!capturedLandmarks) {
                 setCapturedLandmarks([...landmarks]);
-                console.log('[Calibration] ✅ Main capturée!', {
-                    palmWidthPx: palmWidth.toFixed(1),
-                    pixelsPerMm: currentPixelsPerMm.toFixed(3),
-                    palmWidthMm: (palmWidth / currentPixelsPerMm).toFixed(1),
-                });
             }
         } else {
             setIsHandInFrame(false);
@@ -312,7 +286,6 @@ export function CalibrationWizard({
     const handleConfirm = () => {
         // Utiliser les landmarks capturés par MediaPipe
         if (!capturedLandmarks || !detectedPalmWidthPx) {
-            console.warn('[Calibration] ⚠️ Pas de landmarks capturés');
             return;
         }
 
@@ -334,16 +307,6 @@ export function CalibrationWizard({
 
         // La largeur de paume détectée par MediaPipe, convertie en mm
         // pixelsPerMm est calculé depuis le cadre de référence
-        const palmWidthMm = detectedPalmWidthPx / currentPixelsPerMm;
-
-        console.log('[Calibration] 📏 Mesures main:', {
-            distance: step.distance,
-            referenceFrameWidthPx: referenceFrameWidth.toFixed(1),
-            pixelsPerMm: currentPixelsPerMm.toFixed(3),
-            palmWidthPx: detectedPalmWidthPx.toFixed(1),
-            palmWidthMm: palmWidthMm.toFixed(1),
-            handHeightPx: handHeightPx.toFixed(1),
-        });
 
         // Calculer les mesures de chaque doigt à partir des VRAIS landmarks
         const handMeasurements: HandMeasurements = {
@@ -355,13 +318,6 @@ export function CalibrationWizard({
             pinky: calculateFingerMeasurementFromLandmarks('pinky', capturedLandmarks, currentPixelsPerMm),
         };
 
-        console.log('[Calibration] 💍 Tailles bagues:', {
-            index: handMeasurements.index?.ringSizes.eu,
-            middle: handMeasurements.middle?.ringSizes.eu,
-            ring: handMeasurements.ring?.ringSizes.eu,
-            pinky: handMeasurements.pinky?.ringSizes.eu,
-        });
-
         if (step.distance === 'close') {
             setCloseHandMeasurements(handMeasurements);
         } else {
@@ -372,17 +328,6 @@ export function CalibrationWizard({
         if (currentStep < 2) {
             setCurrentStep(currentStep + 1);
         } else {
-            // Calculer et logger le FOV réel avant de terminer
-            if (videoElement?.videoWidth) {
-                const visibleWidthMm = (videoElement.videoWidth / referenceFrameWidth) * CREDIT_CARD_WIDTH_MM;
-                const calculatedFov = 2 * Math.atan(visibleWidthMm / (2 * distanceMm)) * (180 / Math.PI);
-                console.log('[Calibration] 📐 FOV calculé:', {
-                    assumedFov: ASSUMED_FOV_DEG,
-                    calculatedFov: calculatedFov.toFixed(1),
-                    visibleWidthMm: visibleWidthMm.toFixed(1),
-                    distanceMm,
-                });
-            }
             completeCalibration();
             onClose();
         }

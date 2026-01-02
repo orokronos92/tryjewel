@@ -135,7 +135,6 @@ export default function TrackingPage() {
     if (!hasResetRef.current) {
       hasResetRef.current = true;
       resetCalibration();
-      console.log('[Tracking] 🔄 Calibration reset pour nouvelle session');
     }
   }, []);
 
@@ -190,7 +189,6 @@ export default function TrackingPage() {
 
   useEffect(() => {
     initPerformance();
-    console.log('[TrackingPage] 🎯 Performance system initialized, tier:', currentTier, getTierName(currentTier));
   }, [initPerformance]);
 
   // ==========================================================================
@@ -264,7 +262,6 @@ export default function TrackingPage() {
         if (!last || last.width !== width || last.height !== height) {
           lastDimensionsRef.current = { width, height };
           setVideoDimensions({ width, height });
-          console.log('[Page] 📐 Video dimensions updated:', { width, height });
         }
       }
     };
@@ -297,20 +294,13 @@ export default function TrackingPage() {
 
   const handleButtonClick = useCallback(() => {
     const calibStore = useCalibrationStore.getState();
-    console.log('[Tracking] 🚀 Button clicked, state:', {
-      isCalibrated: calibStore.isCalibrated,
-      isCalibrating: calibStore.isCalibrating,
-      currentStep: calibStore.currentStep,
-    });
 
     if (!calibStore.isCalibrated) {
       // Lancer la calibration
-      console.log('[Tracking] 📐 Lancement calibration wizard...');
       useCalibrationStore.getState().setIsCalibrating(true);
       startTracking(); // Pour avoir les landmarks MediaPipe
     } else {
       // Calibré -> lancer le tracking
-      console.log('[Tracking] ✅ Calibré, démarrage essayage...');
       startTracking();
     }
   }, [startTracking]);

@@ -87,9 +87,7 @@ export function PerformanceDebug({
         fpsTrackerRef.current = new FPSTracker(60);
         
         setIsInitialized(true);
-        
-        console.log('[PerformanceDebug] 🔍 Device capabilities:', caps);
-        
+
         return () => {
             if (animationFrameRef.current) {
                 cancelAnimationFrame(animationFrameRef.current);
@@ -132,7 +130,6 @@ export function PerformanceDebug({
     const handleTierChange = (tier: PerformanceTier) => {
         setSelectedTier(tier);
         onTierChange?.(tier);
-        console.log('[PerformanceDebug] 📊 Manual tier change:', tier, getTierName(tier));
     };
     
     // =========================================================================

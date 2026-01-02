@@ -111,31 +111,24 @@ const LOAD_TIMEOUT = 30000;
 export async function loadOpenCV(): Promise<OpenCVModule> {
   // Return cached instance
   if (cvInstance) {
-    console.log('[OpenCV] Using cached instance');
     return cvInstance;
   }
 
   // Return existing promise if already loading
   if (cvLoadPromise) {
-    console.log('[OpenCV] Already loading, waiting...');
     return cvLoadPromise;
   }
 
   // Check if already loaded globally (and ready)
   if (typeof window !== 'undefined' && (window as any).cv && (window as any).cv.Mat) {
-    console.log('[OpenCV] Already loaded globally');
     cvInstance = (window as any).cv as OpenCVModule;
     return cvInstance;
   }
 
   // Start loading from CDN
   cvLoadPromise = new Promise<OpenCVModule>((resolve, reject) => {
-    console.log('[OpenCV] 🔄 Loading from CDN:', OPENCV_CDN_URL);
-    const startTime = performance.now();
-
     // Timeout handler
     const timeoutId = setTimeout(() => {
-      console.error('[OpenCV] ❌ Loading timeout after 30s');
       cvLoadPromise = null;
       reject(new Error('OpenCV.js loading timeout'));
     }, LOAD_TIMEOUT);
@@ -144,12 +137,6 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
     (window as any).Module = {
       onRuntimeInitialized: () => {
         const cv = (window as any).cv;
-        console.log('[OpenCV] onRuntimeInitialized called, cv state:', {
-          cvExists: !!cv,
-          hasMat: cv && !!cv.Mat,
-          hasMatVector: cv && !!cv.MatVector,
-          cvKeys: cv ? Object.keys(cv).slice(0, 30) : [],
-        });
 
         // Try waiting a bit for cv.Mat to become available
         let matCheckAttempts = 0;
@@ -158,16 +145,12 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
           const cvNow = (window as any).cv;
           if (cvNow && cvNow.Mat) {
             clearTimeout(timeoutId);
-            const loadTime = (performance.now() - startTime).toFixed(0);
-            console.log(`[OpenCV] ✅ Ready via onRuntimeInitialized in ${loadTime}ms (after ${matCheckAttempts} Mat checks)`);
             cvInstance = cvNow as OpenCVModule;
             resolve(cvInstance);
           } else if (matCheckAttempts < 50) {
             setTimeout(checkMat, 100);
-          } else {
-            console.error('[OpenCV] ❌ cv.Mat never became available after onRuntimeInitialized');
-            // Don't reject - let polling continue
           }
+          // Don't reject - let polling continue
         };
         checkMat();
       }
@@ -179,8 +162,6 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
     script.async = true;
 
     script.onload = () => {
-      console.log('[OpenCV] 📦 Script loaded, waiting for WASM initialization...');
-
       // Fallback: poll for cv.Mat if onRuntimeInitialized doesn't fire
       let attempts = 0;
       const maxAttempts = 100; // 10 seconds max
@@ -189,30 +170,11 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
         attempts++;
         const cv = (window as any).cv;
 
-        // Debug: log cv state
-        if (attempts <= 5 || attempts % 10 === 0) {
-          console.log(`[OpenCV] Polling attempt ${attempts}:`, {
-            cvExists: !!cv,
-            cvType: typeof cv,
-            cvKeys: cv ? Object.keys(cv) : [],
-            hasMat: cv && !!cv.Mat,
-            hasThen: cv && typeof cv.then === 'function',
-            hasReady: cv && typeof cv.ready === 'object',
-          });
-        }
-
         // Check if cv is a Promise (newer OpenCV.js pattern)
         if (cv && typeof cv.then === 'function' && !cvInstance) {
-          console.log('[OpenCV] cv is a Promise, awaiting...', {
-            cvKeys: Object.keys(cv).slice(0, 20),
-            hasOnRuntimeInitialized: 'onRuntimeInitialized' in cv,
-          });
-
           // Set a timeout for the Promise
           const promiseTimeout = setTimeout(() => {
-            console.error('[OpenCV] ❌ Promise timeout - checking if cv has Mat now...');
             if (cv.Mat) {
-              console.log('[OpenCV] ✅ cv.Mat available after Promise timeout!');
               clearTimeout(timeoutId);
               cvInstance = cv as OpenCVModule;
               resolve(cvInstance);
@@ -222,17 +184,13 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
           cv.then((readyCv: OpenCVModule) => {
             clearTimeout(promiseTimeout);
             clearTimeout(timeoutId);
-            const loadTime = (performance.now() - startTime).toFixed(0);
-            console.log(`[OpenCV] ✅ Ready via Promise in ${loadTime}ms`);
             cvInstance = readyCv || cv; // Use cv if readyCv is undefined
             (window as any).cv = cvInstance;
             resolve(cvInstance);
-          }).catch((err: Error) => {
+          }).catch(() => {
             clearTimeout(promiseTimeout);
-            console.error('[OpenCV] Promise rejected:', err);
             // Try using cv directly if it has Mat
             if (cv.Mat) {
-              console.log('[OpenCV] ✅ Using cv directly after Promise rejection');
               cvInstance = cv as OpenCVModule;
               resolve(cvInstance);
             }
@@ -243,19 +201,11 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
         if (cv && cv.Mat) {
           clearTimeout(timeoutId);
           if (!cvInstance) { // Avoid duplicate resolve
-            const loadTime = (performance.now() - startTime).toFixed(0);
-            console.log(`[OpenCV] ✅ Ready via polling in ${loadTime}ms (attempt ${attempts})`);
             cvInstance = cv as OpenCVModule;
             resolve(cvInstance);
           }
         } else if (attempts < maxAttempts) {
           setTimeout(checkReady, 100);
-        } else {
-          console.error('[OpenCV] ❌ Max polling attempts reached, cv state:', {
-            cvExists: !!cv,
-            cvType: typeof cv,
-            cvKeys: cv ? Object.keys(cv).slice(0, 20) : [],
-          });
         }
         // Don't reject here - let timeout handle failure
       };
@@ -264,9 +214,8 @@ export async function loadOpenCV(): Promise<OpenCVModule> {
       setTimeout(checkReady, 200);
     };
 
-    script.onerror = (error) => {
+    script.onerror = () => {
       clearTimeout(timeoutId);
-      console.error('[OpenCV] ❌ Script load error:', error);
       cvLoadPromise = null;
       reject(new Error('Failed to load OpenCV.js script'));
     };

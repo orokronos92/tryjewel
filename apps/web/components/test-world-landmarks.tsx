@@ -61,7 +61,7 @@ export function TestWorldLandmarks() {
             videoRef.current.play();
           }
         })
-        .catch(err => console.error('Camera error:', err));
+        .catch(() => { /* Silent */ });
     }
   }, []);
 

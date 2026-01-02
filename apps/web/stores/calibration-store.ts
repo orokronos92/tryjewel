@@ -229,7 +229,6 @@ export const useCalibrationStore = create<CalibrationState>()(
                 const farMeasurements = farDistance?.handMeasurements;
 
                 if (!closeMeasurements && !farMeasurements) {
-                    console.warn('[Calibration] Pas de mesures de main disponibles');
                     return;
                 }
 
@@ -255,36 +254,12 @@ export const useCalibrationStore = create<CalibrationState>()(
                     pinky: averageRingSizes(closeMeasurements?.pinky?.ringSizes, farMeasurements?.pinky?.ringSizes),
                 };
 
-                // Log de comparaison des deux mesures
-                console.log('═══════════════════════════════════════════════════════════');
-                console.log('[Calibration] 📊 COMPARAISON 20cm vs 40cm:');
-                console.log('═══════════════════════════════════════════════════════════');
-
-                const fingers = ['index', 'middle', 'ring', 'pinky'] as const;
-                fingers.forEach(finger => {
-                    const closeSize = closeMeasurements?.[finger]?.ringSizes.eu ?? 'N/A';
-                    const farSize = farMeasurements?.[finger]?.ringSizes.eu ?? 'N/A';
-                    const finalSize = finalSizes[finger]?.eu ?? 'N/A';
-                    const diff = (typeof closeSize === 'number' && typeof farSize === 'number')
-                        ? Math.abs(closeSize - farSize)
-                        : 'N/A';
-
-                    console.log(`[Calibration] ${finger}: 20cm=${closeSize} EU | 40cm=${farSize} EU | Δ=${diff} | Final=${finalSize} EU`);
-                });
-
                 // Calculer le facteur d'échelle pour le squelette
                 let scaleFactor = 1.0;
                 if (closeDistance && farDistance && farDistance.cardWidthPx > 0) {
                     const distanceRatio = closeDistance.cardWidthPx / farDistance.cardWidthPx;
                     scaleFactor = distanceRatio;
                 }
-
-                // =====================================================================
-                // LOGS Z CALIBRATION - Calcul de la focal length et estimation Z
-                // =====================================================================
-                console.log('═══════════════════════════════════════════════════════════');
-                console.log('[Z-Calibration] 📐 CALCUL DE PROFONDEUR');
-                console.log('═══════════════════════════════════════════════════════════');
 
                 // Calcul du FOV à partir de la focal length
                 let fovData: { horizontal: number; vertical: number; focalLengthPx: number } | null = null;
@@ -293,29 +268,6 @@ export const useCalibrationStore = create<CalibrationState>()(
                     const focalClose = (closeDistance.cardWidthPx * CLOSE_DISTANCE_MM) / CREDIT_CARD_WIDTH_MM;
                     const focalFar = (farDistance.cardWidthPx * FAR_DISTANCE_MM) / CREDIT_CARD_WIDTH_MM;
                     const focalAvg = (focalClose + focalFar) / 2;
-
-                    console.log('[Z-Calibration] Carte à 20cm:', {
-                        cardWidthPx: closeDistance.cardWidthPx.toFixed(1),
-                        pixelsPerMm: closeDistance.pixelsPerMm.toFixed(3),
-                        focalLength: focalClose.toFixed(1),
-                    });
-
-                    console.log('[Z-Calibration] Carte à 40cm:', {
-                        cardWidthPx: farDistance.cardWidthPx.toFixed(1),
-                        pixelsPerMm: farDistance.pixelsPerMm.toFixed(3),
-                        focalLength: focalFar.toFixed(1),
-                    });
-
-                    const actualRatio = closeDistance.cardWidthPx / farDistance.cardWidthPx;
-                    const expectedRatio = FAR_DISTANCE_MM / CLOSE_DISTANCE_MM;
-
-                    console.log('[Z-Calibration] Vérification ratio:', {
-                        actual: actualRatio.toFixed(3),
-                        expected: expectedRatio.toFixed(1),
-                        ecart: ((actualRatio - expectedRatio) / expectedRatio * 100).toFixed(1) + '%',
-                    });
-
-                    console.log('[Z-Calibration] 🎯 Focal length moyenne:', focalAvg.toFixed(1), 'pixels');
 
                     // Calculer le FOV si on a les dimensions vidéo
                     const videoDims = get().videoDimensions;
@@ -329,20 +281,8 @@ export const useCalibrationStore = create<CalibrationState>()(
                             vertical: Math.round(fovVertical * 10) / 10,
                             focalLengthPx: Math.round(focalAvg),
                         };
-
-                        console.log('═══════════════════════════════════════════════════════════');
-                        console.log('[FOV-Calibration] 📷 CALCUL DU CHAMP DE VISION');
-                        console.log('═══════════════════════════════════════════════════════════');
-                        console.log('[FOV-Calibration] Video dimensions:', `${videoDims.width}x${videoDims.height}`);
-                        console.log('[FOV-Calibration] Focal length:', focalAvg.toFixed(1), 'px');
-                        console.log('[FOV-Calibration] 🎯 FOV Horizontal:', fovData.horizontal.toFixed(1), '°');
-                        console.log('[FOV-Calibration] 🎯 FOV Vertical:', fovData.vertical.toFixed(1), '°');
-                    } else {
-                        console.warn('[FOV-Calibration] ⚠️ Dimensions vidéo non disponibles pour calcul FOV');
                     }
                 }
-
-                console.log('═══════════════════════════════════════════════════════════');
 
                 set({
                     finalFingerSizes: finalSizes,
@@ -352,8 +292,6 @@ export const useCalibrationStore = create<CalibrationState>()(
                     isCalibrating: false,
                     currentStep: 5,
                 });
-
-                console.log('[Calibration] ✅ Calibration terminée (moyenne 20cm+40cm):', finalSizes);
             },
 
             resetCalibration: () => set({

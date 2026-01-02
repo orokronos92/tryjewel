@@ -40,7 +40,6 @@ export function useJewelryModels(): UseJewelryModelsReturn {
       if (!model) throw new Error(`Model ${modelId} not found`);
 
       // TODO: Implémenter GLTFLoader ici
-      console.log('Loading model:', model.path);
       setSelectedModel(model);
       return model;
     } catch (err) {
@@ -52,7 +51,6 @@ export function useJewelryModels(): UseJewelryModelsReturn {
   };
 
   const preloadModels = async (modelIds: string[]) => {
-    console.log('Preloading models:', modelIds);
     for (const modelId of modelIds) {
       await loadModel(modelId);
     }

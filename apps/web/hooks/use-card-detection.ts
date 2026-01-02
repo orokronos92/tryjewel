@@ -235,7 +235,6 @@ function detectCardQuadLite(
     const r = quadRatio(quadSmall);
     const err = Math.abs(r - CREDIT_CARD_ASPECT_RATIO);
     if (err > 0.6) {
-        console.log(`[CardDetection] Ratio mismatch: ${r.toFixed(2)} (expected ~1.59)`);
         return { quad: null, edges, w, h, histX, histY, vLines, hLines };
     }
 
@@ -245,8 +244,6 @@ function detectCardQuadLite(
         x: p.x * invScale,
         y: p.y * invScale,
     })) as CardQuad;
-
-    console.log(`[CardDetection] ✅ Card detected: ${(xR-xL)}x${(yB-yT)}px ratio=${r.toFixed(2)}`);
 
     return { quad: quadSrc, edges, w, h, histX, histY, vLines, hLines };
 }
@@ -492,11 +489,6 @@ export function useCardDetection({
                             sizeRatioH >= (1 - actualSizeTolerance) && sizeRatioH <= (1 + actualSizeTolerance);
         const isPositionMatch = offsetX <= posToleranceCrop && offsetY <= posToleranceCrop;
         const isAligned = isSizeMatch && isPositionMatch;
-
-        // Debug logging
-        if (!isAligned) {
-            console.log(`[CardDetection] Not aligned: size=${sizeRatioW.toFixed(2)}x${sizeRatioH.toFixed(2)} pos=${offsetX.toFixed(0)},${offsetY.toFixed(0)} (tol: size=${actualSizeTolerance.toFixed(2)}, pos=${posToleranceCrop.toFixed(0)})`);
-        }
 
         // Convert to container coordinates
         const scaleToContainer = drawWidth / srcW;

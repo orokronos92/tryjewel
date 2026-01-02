@@ -283,16 +283,11 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             const centerOriginal = new THREE.Vector3();
             boxOriginal.getCenter(centerOriginal);
 
-            console.log('[GLB Load] 📦 Original size:', sizeOriginal.toArray().map(v => v.toFixed(4)));
-            console.log('[GLB Load] 📍 Original center:', centerOriginal.toArray().map(v => v.toFixed(4)));
-
             // 2. Appliquer le scaling
             const maxDim = Math.max(sizeOriginal.x, sizeOriginal.y, sizeOriginal.z);
             const targetSize = 0.08;
             const scaleFactor = maxDim > 0 ? targetSize / maxDim : 1;
             model.scale.setScalar(scaleFactor);
-
-            console.log('[GLB Load] 📏 Scale factor:', scaleFactor.toFixed(4));
 
             // 3. Appliquer la rotation AVANT de centrer
             // Le quaternion du doigt a Y aligné le long du doigt
@@ -309,20 +304,14 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             const centerFinal = new THREE.Vector3();
             boxFinal.getCenter(centerFinal);
 
-            console.log('[GLB Load] 📦 Final size (after scale+rot):', sizeFinal.toArray().map(v => v.toFixed(4)));
-            console.log('[GLB Load] 📍 Final center (after scale+rot):', centerFinal.toArray().map(v => v.toFixed(4)));
-
             // 6. Centrer le modèle sur l'origine du groupe APRÈS toutes les transformations
             model.position.set(-centerFinal.x, -centerFinal.y, -centerFinal.z);
-
-            console.log('[GLB Load] ✅ Model position offset:', model.position.toArray().map(v => v.toFixed(4)));
 
             model.traverse((child) => {
                 if ((child as THREE.Mesh).isMesh) (child as THREE.Mesh).renderOrder = 1;
             });
 
             ringRef.current?.add(model);
-            console.log('[GLB Load] 🎉 Ring loaded and centered');
         });
 
         // ⚡ FIX DEV MODE: Créer les axes EN DEHORS du callback async
@@ -332,7 +321,6 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
         ringAxes.visible = showRingAxesRef.current; // ⚡ Utiliser l'état actuel
         scene.add(ringAxes);
         ringAxesRef.current = ringAxes;
-        console.log('[3D] 🎯 Ring axes créés, visible:', ringAxes.visible);
 
         // Debug Axes Bone (Phalange)
         const boneAxes = createThickAxesHelper(1, 0.016);
@@ -340,7 +328,6 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
         boneAxes.visible = showSkeletonRef.current; // ⚡ Utiliser l'état actuel
         scene.add(boneAxes);
         boneAxesRef.current = boneAxes;
-        console.log('[3D] 🦴 Bone axes créés, visible:', boneAxes.visible);
 
         const storeCache = {
             tracking: useEdgeTrackingStore.getState().tracking,
@@ -409,55 +396,10 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
                 // Formule: zFactor = skeletonScaleFactor * constante d'ajustement
                 const PERSPECTIVE_CONSTANT = 0.75; // Ajustable selon les résultats
                 zFactor = skeletonScaleFactor * PERSPECTIVE_CONSTANT;
-
-                // Log périodique (toutes les 2 secondes)
-                const now = Date.now();
-                if (!lastZFactorLogRef.current || now - lastZFactorLogRef.current > 2000) {
-                    lastZFactorLogRef.current = now;
-                    console.log('%c[Calibration Z] 📐 zFactor CALIBRÉ', 'color: #00FF00; font-weight: bold', {
-                        isCalibrated,
-                        closeCardPx: closeDistance.cardWidthPx,
-                        farCardPx: farDistance.cardWidthPx,
-                        skeletonScaleFactor: skeletonScaleFactor.toFixed(3),
-                        zFactor: zFactor.toFixed(3),
-                        formula: `${skeletonScaleFactor.toFixed(2)} × ${PERSPECTIVE_CONSTANT} = ${zFactor.toFixed(3)}`
-                    });
-                }
-            } else {
-                // Log si pas calibré
-                const now = Date.now();
-                if (!lastZFactorLogRef.current || now - lastZFactorLogRef.current > 5000) {
-                    lastZFactorLogRef.current = now;
-                    console.log('%c[Calibration Z] ⚠️ zFactor par DÉFAUT (pas calibré)', 'color: #FFAA00', {
-                        isCalibrated,
-                        zFactor: 1.5
-                    });
-                }
             }
 
             const centerX = landmarks.reduce((s, l) => s + l.x, 0) / landmarks.length;
             const centerY = landmarks.reduce((s, l) => s + l.y, 0) / landmarks.length;
-
-            // Log périodique pour debug Z - UTILISE REF SÉPARÉE!
-            const nowZDebug = Date.now();
-            if (nowZDebug - lastZDebugLogRef.current > 1500) {
-                lastZDebugLogRef.current = nowZDebug;
-                const currentOffsetZ = skelAdj.offsetZ;
-                console.log('%c[Z DEBUG] 🔵 skelAdj.offsetZ =', 'color: #00AAFF; font-weight: bold; font-size: 14px', currentOffsetZ, {
-                    zFactor: zFactor.toFixed(3),
-                    offsetZType: typeof currentOffsetZ,
-                    offsetZRaw: currentOffsetZ,
-                    offsetZEffect: (currentOffsetZ / 500).toFixed(4),
-                    skelAdjKeys: Object.keys(skelAdj),
-                    skelAdjSnapshot: {
-                        offsetX: skelAdj.offsetX,
-                        offsetY: skelAdj.offsetY,
-                        offsetZ: skelAdj.offsetZ,
-                        scaleX: skelAdj.scaleX,
-                        scaleY: skelAdj.scaleY,
-                    }
-                });
-            }
 
             // ⚡ Z offset effect - lecture depuis skelAdj
             // Le Z offset affecte AUSSI la position Y pour simuler la perspective
@@ -467,26 +409,13 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
             const zParallaxY = zOffsetValue / 2000;          // Effet parallaxe sur Y (plus subtil)
             const zParallaxScale = 1 + (zOffsetValue / 1000); // Légère échelle (1 ± 20%)
 
-            const positions = landmarks.map((lm, idx) => {
+            const positions = landmarks.map((lm) => {
                 const scaledX = centerX + (lm.x - centerX) * scaleX + skelAdj.offsetX / width;
                 // ⚡ Y inclut maintenant l'effet parallaxe du Z
                 const scaledY = centerY + (lm.y - centerY) * scaleY + skelAdj.offsetY / height + zParallaxY;
                 // ✅ Utiliser -lm.z avec zFactor calibré + offsetZ pour ajustement manuel
                 const baseZ = -lm.z * zFactor;
                 const scaledZ = baseZ + zOffsetEffect;
-
-                // Log détaillé pour le premier landmark (wrist) uniquement
-                if (idx === 0 && nowZDebug - lastZDebugLogRef.current < 100) {
-                    console.log('%c[Z CALC] 🎯 Landmark 0 (wrist)', 'color: #FF00FF; font-weight: bold', {
-                        'lm.z': lm.z.toFixed(4),
-                        baseZ: baseZ.toFixed(4),
-                        zOffsetValue,
-                        zOffsetEffect: zOffsetEffect.toFixed(4),
-                        zParallaxY: zParallaxY.toFixed(4),
-                        zParallaxScale: zParallaxScale.toFixed(3),
-                        scaledZ: scaledZ.toFixed(4),
-                    });
-                }
 
                 return new THREE.Vector3((scaledX - 0.5) * aspect, 0.5 - scaledY, scaledZ);
             });
@@ -695,88 +624,6 @@ export function Jewelry3D({ videoWidth, videoHeight }: Jewelry3DProps) {
                 ringAxesRef.current.position.copy(ringRef.current.position);
                 ringAxesRef.current.quaternion.copy(ringRef.current.quaternion);
                 ringAxesRef.current.scale.copy(ringRef.current.scale);
-            }
-
-            // Debug logging (seulement si axes visibles)
-            if (boneAxesRef.current && showSkeletonRef.current) {
-                const now = Date.now();
-                if (now - lastLogRef.current > 1000) {
-                    lastLogRef.current = now;
-
-                    // Récupérer l'occluder du même doigt pour comparaison
-                    const occluderMesh = occludersRef.current.get(targetBoneName);
-
-                    console.group("🔍 DEBUG RING vs OCCLUDER");
-
-                    // Position comparison
-                    console.log("%c📍 POSITIONS", "color: #FF6600; font-weight: bold");
-                    console.table({
-                        "Ring": {
-                            x: ringRef.current.position.x.toFixed(4),
-                            y: ringRef.current.position.y.toFixed(4),
-                            z: ringRef.current.position.z.toFixed(4)
-                        },
-                        "BoneData": {
-                            x: boneData.position.x.toFixed(4),
-                            y: boneData.position.y.toFixed(4),
-                            z: boneData.position.z.toFixed(4)
-                        },
-                        "Occluder": occluderMesh ? {
-                            x: occluderMesh.position.x.toFixed(4),
-                            y: occluderMesh.position.y.toFixed(4),
-                            z: occluderMesh.position.z.toFixed(4)
-                        } : "N/A"
-                    });
-
-                    // Z difference (floating issue)
-                    if (occluderMesh) {
-                        const zDiff = ringRef.current.position.z - occluderMesh.position.z;
-                        console.log(`%c⬆️ Ring Z - Occluder Z = ${zDiff.toFixed(4)} (positif = ring devant)`,
-                            zDiff > 0 ? "color: #00FF00" : "color: #FF0000");
-                    }
-
-                    // Scale comparison
-                    console.log("%c📏 SCALES", "color: #FF6600; font-weight: bold");
-                    console.table({
-                        "Ring": { scale: ringRef.current.scale.x.toFixed(4) },
-                        "Occluder": occluderMesh ? { scale: occluderMesh.scale.x.toFixed(4) } : "N/A",
-                        "BoneLength": { length: boneData.length.toFixed(4) }
-                    });
-
-                    // Rotation comparison
-                    const ringE = new THREE.Euler().setFromQuaternion(ringRef.current.quaternion);
-                    const boneE = new THREE.Euler().setFromQuaternion(boneData.quaternion);
-                    const occE = occluderMesh ? new THREE.Euler().setFromQuaternion(occluderMesh.quaternion) : null;
-
-                    console.log("%c🔄 ROTATIONS (degrees)", "color: #FF6600; font-weight: bold");
-                    console.table({
-                        "Ring": {
-                            x: THREE.MathUtils.radToDeg(ringE.x).toFixed(1),
-                            y: THREE.MathUtils.radToDeg(ringE.y).toFixed(1),
-                            z: THREE.MathUtils.radToDeg(ringE.z).toFixed(1)
-                        },
-                        "Bone": {
-                            x: THREE.MathUtils.radToDeg(boneE.x).toFixed(1),
-                            y: THREE.MathUtils.radToDeg(boneE.y).toFixed(1),
-                            z: THREE.MathUtils.radToDeg(boneE.z).toFixed(1)
-                        },
-                        "Occluder": occE ? {
-                            x: THREE.MathUtils.radToDeg(occE.x).toFixed(1),
-                            y: THREE.MathUtils.radToDeg(occE.y).toFixed(1),
-                            z: THREE.MathUtils.radToDeg(occE.z).toFixed(1)
-                        } : "N/A"
-                    });
-
-                    // Hand normal (for orientation debugging)
-                    console.log("%c🖐️ HAND NORMAL", "color: #FF6600; font-weight: bold", {
-                        x: handNormal.x.toFixed(3),
-                        y: handNormal.y.toFixed(3),
-                        z: handNormal.z.toFixed(3),
-                        "pointing": handNormal.z > 0 ? "toward camera (+Z)" : "away from camera (-Z)"
-                    });
-
-                    console.groupEnd();
-                }
             }
 
             renderer.render(scene, camera);

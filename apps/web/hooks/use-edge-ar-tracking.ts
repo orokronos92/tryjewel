@@ -208,7 +208,6 @@ async function getWorkerSingleton(config: {
         workerSingleton.waiters = [];
         waiters.forEach((w) => w.resolve(worker));
 
-        console.log("%c[WebWorker] ✅ MediaPipe Worker prêt", "color:#00ff00;font-weight:bold");
         return worker;
 
     } catch (err: any) {
@@ -220,7 +219,6 @@ async function getWorkerSingleton(config: {
         workerSingleton.waiters = [];
         waiters.forEach((w) => w.reject(error));
 
-        console.error("[WebWorker] ❌ Init Worker failed", error);
         throw error;
     }
 }
@@ -299,7 +297,6 @@ async function getHandLandmarkerSingleton(options: {
         landmarkerMutex.waiters = [];
         waiters.forEach((w) => w.resolve(landmarker));
 
-        console.log("%c[MediaPipe Tasks] ✅ HandLandmarker prêt", "color:#00ff00;font-weight:bold");
         return landmarker;
     } catch (err: any) {
         const error = err instanceof Error ? err : new Error(String(err));
@@ -310,7 +307,6 @@ async function getHandLandmarkerSingleton(options: {
         landmarkerMutex.waiters = [];
         waiters.forEach((w) => w.reject(error));
 
-        console.error("[MediaPipe Tasks] ❌ Init HandLandmarker failed", error);
         throw error;
     }
 }
@@ -414,8 +410,6 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
         offscreenCanvasRef.current = canvas;
         offscreenCtxRef.current = ctx;
 
-        console.log(`[MediaPipe] 📐 Offscreen canvas créé: ${MEDIAPIPE_INPUT_WIDTH}x${MEDIAPIPE_INPUT_HEIGHT}`);
-
         return () => {
             offscreenCanvasRef.current = null;
             offscreenCtxRef.current = null;
@@ -432,7 +426,6 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
 
                 if (USE_WEB_WORKER) {
                     // ⚡ Mode Web Worker - détection dans un thread séparé
-                    console.log("[AR] 🔧 Initialisation en mode Web Worker...");
                     await getWorkerSingleton({
                         numHands: 1,
                         modelComplexity: (options.modelComplexity ?? 0) as 0 | 1,
@@ -441,7 +434,6 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
                     });
                 } else {
                     // Mode classique - détection sur thread principal
-                    console.log("[AR] 🔧 Initialisation en mode direct...");
                     await getHandLandmarkerSingleton({
                         minDetectionConfidence,
                         minTrackingConfidence,
@@ -452,7 +444,6 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
 
                 if (!cancelled) setIsInitialized(true);
             } catch (err) {
-                console.error("[AR] Init error:", err);
                 if (!cancelled) {
                     setIsInitialized(false);
                     setError("Votre appareil/navigateur ne supporte pas le tracking AR.");
@@ -530,27 +521,6 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
 
                     let q = computeFinalQuaternion(basis, palmFacing);
                     q = ensureQuaternionContinuity(q, lastRawQuatRef.current);
-
-                    // 1) & 2) Debug Logs : Drift & Palm
-                    const now = performance.now();
-                    if (now - lastLogRef.current > 1000) {
-                        const camDir = new THREE.Vector3(0, 0, POSE_DEBUG_CONFIG.CAMERA_DIR_Z);
-                        const dot = basis.palmNormal.dot(camDir);
-
-                        // Calculate Drift
-                        const ringY = new THREE.Vector3(0, 1, 0).applyQuaternion(q).normalize();
-                        const boneY = basis.axisY.clone().normalize();
-                        const driftAngle = (ringY.angleTo(boneY) * 180) / Math.PI;
-
-                        // Calculate "Atomic" Correction (Bone * Inv(Ring))
-                        const rotMatrix = new THREE.Matrix4().makeBasis(basis.axisX, basis.axisY, basis.axisZ);
-                        const basisQuat = new THREE.Quaternion().setFromRotationMatrix(rotMatrix);
-                        const qDiff = basisQuat.clone().multiply(q.clone().invert());
-                        const eDiff = new THREE.Euler().setFromQuaternion(qDiff);
-
-                        console.log(`[AR Debug] Mode=${POSE_DEBUG_CONFIG.ORDER_MODE}, palm=${palmFacing}, dot=${dot.toFixed(2)}, drift=${driftAngle.toFixed(1)}°, FixOffset=(${eDiff.x.toFixed(2)}, ${eDiff.y.toFixed(2)}, ${eDiff.z.toFixed(2)})`);
-                        lastLogRef.current = now;
-                    }
 
                     targetQuat = q;
                     lastRawQuatRef.current = targetQuat.clone();
@@ -718,7 +688,6 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
                 try {
                     result = landmarker.detectForVideo(inputSource, nowMs) as TasksHandLandmarkerResult;
                 } catch (err) {
-                    console.warn("[MediaPipe] Detect error:", err);
                     return;
                 }
 
@@ -775,7 +744,7 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
             processingTimesRef.current.push(trackingResult.processing_time_ms);
             if (processingTimesRef.current.length > 60) processingTimesRef.current.shift();
         } catch (e: any) {
-            console.warn("[AR] processFrame error", e);
+            // Silent error
         }
     }, [calculateJewelryTransform]);
 

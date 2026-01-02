@@ -128,8 +128,6 @@ export class FingerOccluderManager {
             this.scene.add(mesh);
             this.occluders.set(config.boneName, mesh);
         });
-        
-        console.log('[FingerOccluders] ✅ Created', this.occluders.size, 'occluders');
     }
     
     // =========================================================================
@@ -204,19 +202,7 @@ export class FingerOccluderManager {
         fingerPositions.forEach((fp, index) => {
             depthOrder.set(fp.name, index);
         });
-        
-        // Debug log (toutes les 60 frames)
-        if (this.frameCount % 60 === 0) {
-            console.log('[FingerOccluders] Depth order:', {
-                palmAngle: palmAngle.toFixed(2),
-                isLeftHand,
-                isPalmFacing,
-                sortAscending,
-                order: fingerPositions.map(fp => `${fp.name}(${fp.x.toFixed(3)})`).join(' → '),
-                ringFingerRank: depthOrder.get(ringFingerName)
-            });
-        }
-        
+
         return depthOrder;
     }
     
@@ -335,7 +321,6 @@ export class FingerOccluderManager {
             this.scene.remove(mesh);
         });
         this.occluders.clear();
-        console.log('[FingerOccluders] 🧹 Disposed');
     }
 }
 

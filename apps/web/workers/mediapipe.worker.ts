@@ -72,8 +72,6 @@ const CANVAS_HEIGHT = 240;
  */
 async function initMediaPipe(msg: InitMessage): Promise<void> {
     try {
-        console.log('[Worker] 🚀 Initialisation MediaPipe...');
-
         // Import dynamique de MediaPipe dans le worker
         const vision = await import('@mediapipe/tasks-vision');
         const { FilesetResolver, HandLandmarker } = vision;
@@ -108,11 +106,8 @@ async function initMediaPipe(msg: InitMessage): Promise<void> {
         };
         self.postMessage(result);
 
-        console.log('[Worker] ✅ MediaPipe initialisé');
-
     } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        console.error('[Worker] ❌ Erreur init:', error);
 
         const result: InitResult = {
             type: 'init_complete',
@@ -193,7 +188,6 @@ function detectHand(msg: DetectMessage): void {
 
     } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        console.error('[Worker] ❌ Erreur détection:', error);
 
         const result: ErrorResult = {
             type: 'error',
@@ -217,9 +211,6 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
         case 'detect':
             detectHand(msg);
             break;
-
-        default:
-            console.warn('[Worker] Message inconnu:', msg);
     }
 };
 

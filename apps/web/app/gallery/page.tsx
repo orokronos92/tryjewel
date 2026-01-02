@@ -34,7 +34,6 @@ export default function GalleryPage() {
         });
       }
     } catch (error) {
-      console.error("Share failed:", error);
       toast({
         title: "Share failed",
         description: "Could not share the image",
@@ -116,9 +115,7 @@ export default function GalleryPage() {
 
         {/* Gallery Component */}
         <Gallery
-          onSelectItem={(item) => {
-            console.log("Selected item:", item);
-          }}
+          onSelectItem={() => { /* noop */ }}
           enableDownloads={true}
         />
       </div>
