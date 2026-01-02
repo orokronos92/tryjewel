@@ -424,6 +424,7 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
         (async () => {
             try {
                 setError(null);
+                console.log("[MEDIAPIPE] 🔄 Starting initialization...");
 
                 if (USE_WEB_WORKER) {
                     // ⚡ Mode Web Worker - détection dans un thread séparé
@@ -443,8 +444,10 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
                     });
                 }
 
+                console.log("[MEDIAPIPE] ✅ Initialization complete! cancelled=", cancelled);
                 if (!cancelled) setIsInitialized(true);
-            } catch (err) {
+            } catch (err: unknown) {
+                console.error("[MEDIAPIPE] ❌ Initialization FAILED:", err);
                 if (!cancelled) {
                     setIsInitialized(false);
                     setError("Votre appareil/navigateur ne supporte pas le tracking AR.");
@@ -453,6 +456,7 @@ export function useEdgeARTracking(videoElement: HTMLVideoElement | null, options
         })();
 
         return () => {
+            console.log("[MEDIAPIPE] 🛑 Effect cleanup - cancelled=true");
             cancelled = true;
         };
     }, [minDetectionConfidence, minTrackingConfidence]);
